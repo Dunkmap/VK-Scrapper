@@ -1,0 +1,50 @@
+{
+    "title": "VK Posts Scraper Configuration",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "vkTargets": {
+            "title": "VK targets",
+            "type": "array",
+            "description": "Start with a public VK handle such as durov, a profile/community URL, a wall URL, an owner ID, or a direct post URL.",
+            "editor": "json",
+            "prefill": ["kinopoisk", "durov"],
+            "items": {
+                "type": "string"
+            }
+        },
+        "maxItems": {
+            "title": "Maximum posts",
+            "type": "integer",
+            "description": "The maximum total number of posts to scrape.",
+            "default": 500
+        },
+        "postsPerTarget": {
+            "title": "Posts per target",
+            "type": "integer",
+            "description": "Limit the maximum number of posts gathered per specific target.",
+            "nullable": true
+        },
+        "publishedAfter": {
+            "title": "Published after",
+            "type": "string",
+            "description": "Filter posts published after this date (YYYY-MM-DD format).",
+            "editor": "textfield",
+            "nullable": true
+        },
+        "publishedBefore": {
+            "title": "Published before",
+            "type": "string",
+            "description": "Filter posts published before this date (YYYY-MM-DD format).",
+            "editor": "textfield",
+            "nullable": true
+        },
+        "includeRawPost": {
+            "title": "Include raw post",
+            "type": "boolean",
+            "description": "Include the unparsed native VK API response payload object.",
+            "default": false
+        }
+    },
+    "required": ["vkTargets"]
+}

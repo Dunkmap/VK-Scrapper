@@ -1,0 +1,18 @@
+{
+    "$schema": "https://apify.com/schemas/v1/actor.ide.json",
+    "actorSpecification": 1,
+    "name": "my-actor-2",
+    "title": "Project Playwright Crawler JavaScript",
+    "description": "Crawlee and Playwright project in JavaScript.",
+    "version": "0.0",
+    "meta": {
+        "templateId": "js-crawlee-playwright-chrome",
+        "generatedBy": "<FILL-IN-MODEL>"
+    },
+    "inputSchema": "./input_schema.json",
+    "outputSchema": "./output_schema.json",
+    "storages": {
+        "dataset": "./dataset_schema.json"
+    },
+    "dockerfile": "../Dockerfile"
+}
