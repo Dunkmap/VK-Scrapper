@@ -16,16 +16,33 @@ export const HTML_LABELS = { WALL: 'HTML_WALL' };
 /** How many "load more" scroll rounds before giving up on a wall. */
 const MAX_SCROLL_ROUNDS = 40;
 
+/** Consecutive rounds that add no posts before we call the wall finished. */
+const BARREN_ROUNDS_BEFORE_STOP = 3;
+
+/** Every markup generation VK has served a wall post in. */
+const POST_SELECTOR = '[data-post-id], .wall_item, ._post, .post';
+
 /**
  * Runs in the browser: reads every wall post currently in the DOM.
  * Kept dependency-free because it is serialized into the page context.
  */
 const extractPostsInPage = () => {
-    /** @param {Element} root @param {string[]} selectors */
+    /** Buttons and badges VK renders *inside* the text node, e.g. "Show more". */
+    const TEXT_CHROME = '.wall_post_more, .PostTextMore, .js-wall_post_more, .wall_post_text_more,'
+        + ' .PostText__more, .show_more, .more_link';
+
+    /**
+     * Reads an element's text with VK's inline UI chrome removed. The node is
+     * cloned so the live page is never mutated.
+     * @param {Element} root @param {string[]} selectors
+     */
     const firstText = (root, selectors) => {
         for (const selector of selectors) {
             const node = root.querySelector(selector);
-            const text = node?.textContent?.trim();
+            if (!node) continue;
+            const clone = node.cloneNode(true);
+            for (const chrome of clone.querySelectorAll(TEXT_CHROME)) chrome.remove();
+            const text = clone.textContent?.replace(/\s+\n/g, '\n').trim();
             if (text) return text;
         }
         return null;
@@ -54,18 +71,35 @@ const extractPostsInPage = () => {
         const ownerId = Number(idMatch[1]);
         const postId = Number(idMatch[2]);
 
-        // VK sometimes stamps an absolute unix time on the date element.
-        const dateNode = container.querySelector('[time], time, .pi_date, .rel_date, .PostHeaderSubtitle__item');
+        // VK sometimes stamps an absolute unix time on the date element; when it
+        // does not, the printed label is the only date available.
+        const dateNode = container.querySelector(
+            'time, [data-time], .pi_date, .rel_date, .PostHeaderSubtitle__item, .post_date, .rel_date_needs_update',
+        );
+        const dateLink = container.querySelector('.PostHeaderSubtitle__link, .post_link, a.pi_date');
         const unix = Number(
             dateNode?.getAttribute?.('time')
             ?? dateNode?.getAttribute?.('data-time')
+            ?? dateNode?.getAttribute?.('unixtime')
             ?? dateNode?.getAttribute?.('datetime')
             ?? NaN,
         );
 
-        const thumbnails = [...container.querySelectorAll('img')]
-            .map((img) => img.getAttribute('src') || img.getAttribute('data-src'))
-            .filter((src) => src && !src.startsWith('data:'));
+        // Media thumbnails only - emoji, avatars and UI sprites are not attachments.
+        const isContentImage = (src) => src
+            && !src.startsWith('data:')
+            && !/\/emoji\//i.test(src)
+            && !/\/images\/(icons|stickers)?/i.test(src)
+            && !/\.svg(\?|$)/i.test(src)
+            && !/\/(css|js)\//i.test(src);
+
+        const thumbnails = [...new Set(
+            [...container.querySelectorAll('img')]
+                .map((img) => img.getAttribute('src') || img.getAttribute('data-src'))
+                .filter(isContentImage)
+                // Resolve protocol-relative and root-relative URLs against the page.
+                .map((src) => new URL(src, document.baseURI).href),
+        )];
 
         const mediaTypes = [];
         if (container.querySelector('a[href*="/photo"], .PhotoPrimaryAttachment, .page_post_sized_thumbs')) mediaTypes.push('photo');
@@ -73,13 +107,19 @@ const extractPostsInPage = () => {
         if (container.querySelector('a[href*="/audio"], .audio_row')) mediaTypes.push('audio');
         if (container.querySelector('a[href*="/doc"], .page_doc_row')) mediaTypes.push('doc');
         if (container.querySelector('.PollQuestion, .poll_board')) mediaTypes.push('poll');
+        // A thumbnail with no recognised container is still media - report it rather than lose it.
+        if (mediaTypes.length === 0 && thumbnails.length > 0) mediaTypes.push('photo');
 
         results.push({
             ownerId,
             postId,
             text: firstText(container, ['.pi_text', '.wall_post_text', '.PostText', '.post_info .wall_post_text']) ?? '',
             postedAtUnix: Number.isFinite(unix) && unix > 0 ? unix : null,
-            postedAtText: dateNode?.textContent?.trim() ?? null,
+            // VK hides the full date in a `title` tooltip and prints a short label.
+            postedAtText: dateLink?.getAttribute('title')?.trim()
+                || dateNode?.getAttribute('title')?.trim()
+                || dateNode?.textContent?.trim()
+                || null,
             likes: parseCounter(firstText(container, ['.PostBottomAction--like .PostBottomAction__count', '._like_count', '.v_like'])),
             comments: parseCounter(firstText(container, ['.PostBottomAction--comment .PostBottomAction__count', '._comments_count', '.v_comments'])),
             reposts: parseCounter(firstText(container, ['.PostBottomAction--share .PostBottomAction__count', '._share_count', '.v_share'])),
@@ -109,7 +149,7 @@ export const createHtmlRouter = ({ collector, config }) => {
         const perTargetLimit = config.postsPerTarget ?? Number.POSITIVE_INFINITY;
         const wanted = Math.min(perTargetLimit, collector.remaining);
 
-        await page.waitForSelector('[data-post-id], .wall_item, ._post', { timeout: 20_000 })
+        await page.waitForSelector(POST_SELECTOR, { timeout: 20_000 })
             .catch(() => {
                 throw new Error(
                     `No wall posts rendered for "${target}". The wall is private, empty, or VK served a login wall. `
@@ -117,23 +157,30 @@ export const createHtmlRouter = ({ collector, config }) => {
                 );
             });
 
-        // Scroll until VK stops adding posts or we have enough.
+        // Scroll until VK stops adding posts or we have enough. VK loads lazily and
+        // often pauses for a beat, so one barren round is not the end of the wall -
+        // only several in a row are.
         let seenCount = 0;
+        let barrenRounds = 0;
         for (let round = 0; round < MAX_SCROLL_ROUNDS; round++) {
-            const count = await page.evaluate(
-                () => document.querySelectorAll('[data-post-id], .wall_item, ._post').length,
-            );
+            const count = await page
+                .evaluate((selector) => document.querySelectorAll(selector).length, POST_SELECTOR)
+                .catch(() => 0);
             if (count >= wanted) break;
 
-            if (count === seenCount && round > 0) break;
+            barrenRounds = count === seenCount ? barrenRounds + 1 : 0;
+            if (barrenRounds >= BARREN_ROUNDS_BEFORE_STOP) {
+                log.info(`[${target}] VK stopped loading posts after ${count} - treating that as the end of the wall.`);
+                break;
+            }
             seenCount = count;
 
             await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-            await page.locator('.show_more_wrap a, ._wall_more_link, .wall_more_link')
+            await page.locator('.show_more_wrap a, ._wall_more_link, .wall_more_link, .ui_show_more')
                 .first()
                 .click({ timeout: 2_000 })
                 .catch(() => {});
-            await page.waitForTimeout(1_500);
+            await page.waitForTimeout(2_000);
         }
 
         const rawPosts = await page.evaluate(extractPostsInPage);
