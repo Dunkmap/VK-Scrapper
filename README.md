@@ -1,69 +1,97 @@
-## PlaywrightCrawler template
+# VK Posts Scraper
 
-<!-- This is an Apify template readme -->
+Extracts wall posts from public VK profiles and communities, with every field VK exposes for a post: text, author, engagement stats, attachment URLs, repost chains, geotags, poll results and — optionally — full comment threads.
 
-This template is a production-ready boilerplate for developing an [Actor](https://apify.com/actors) with `PlaywrightCrawler`. Use this to bootstrap your projects using the most up-to-date code.
+## Input
 
-> We decided to split Apify SDK into two libraries, Crawlee and Apify SDK v3. Crawlee will retain all the crawling and scraping-related tools and will always strive to be the best [web scraping](https://apify.com/web-scraping) library for its community. At the same time, Apify SDK will continue to exist, but keep only the Apify-specific features related to building Actors on the Apify platform. Read the upgrading guide to learn about the changes.
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `vkTargets` | string[] | **required** | Handles (`durov`), profile/community URLs (`https://vk.com/kinopoisk`), signed owner IDs (`-40316705`), or direct post links (`https://vk.com/wall1_45678`). |
+| `accessToken` | string (secret) | — | VK API token with the `wall` scope. Strongly recommended — see [Extraction modes](#extraction-modes). |
+| `maxItems` | integer | `500` | Hard cap on posts stored across all targets. |
+| `postsPerTarget` | integer | — | Optional per-target cap. |
+| `publishedAfter` | string | — | `YYYY-MM-DD` or ISO-8601. Pagination stops once older posts are reached. |
+| `publishedBefore` | string | — | `YYYY-MM-DD` or ISO-8601. A bare date includes the whole day. |
+| `postFilter` | `all` \| `owner` \| `others` | `all` | Which posts to read from the wall (API mode only). |
+| `includeComments` | boolean | `false` | Fetch comment threads, including replies. API mode only. |
+| `maxComments` | integer | `100` | Comments fetched per post. |
+| `includeRawPost` | boolean | `false` | Attach the unmodified VK payload as `rawPost`. |
+| `proxyConfiguration` | object | Residential | VK blocks most datacenter IP ranges. |
 
-## Resources
+```json
+{
+    "vkTargets": ["kinopoisk", "https://vk.com/durov"],
+    "accessToken": "vk1.a.…",
+    "maxItems": 200,
+    "publishedAfter": "2024-01-01",
+    "includeComments": true
+}
+```
 
-If you're looking for examples or want to learn more visit:
+## Extraction modes
 
-- [Crawlee + Apify Platform guide](https://crawlee.dev/docs/guides/apify-platform)
-- [Documentation](https://crawlee.dev/api/playwright-crawler/class/PlaywrightCrawler) and [examples](https://crawlee.dev/docs/examples/playwright-crawler)
-- [Node.js tutorials](https://docs.apify.com/academy/node-js) in Academy
-- [Scraping single-page applications with Playwright](https://blog.apify.com/scraping-single-page-applications-with-playwright/)
-- [How to scale Puppeteer and Playwright](https://blog.apify.com/how-to-scale-puppeteer-and-playwright/)
-- [Integration with Zapier](https://apify.com/integrations), Make, GitHub, Google Drive and other apps
-- [Video guide on getting data using Apify API](https://www.youtube.com/watch?v=ViYYDHSBAKM)
-- A short guide on how to create Actors using code templates:
+**API mode** (an `accessToken` is supplied) calls the official VK API — `wall.get`, `wall.getById`, `wall.getComments`. This is the mode the Actor is built around and the only one that returns complete data. Get a token by creating a [standalone VK application](https://dev.vk.com/) and issuing a user token with the `wall` scope.
 
-[web scraper template](https://www.youtube.com/watch?v=u-i-Korzf8w)
+**HTML mode** (no token) scrapes `m.vk.com` in a browser. It is a genuine fallback, not a substitute: VK's public HTML has no attachment URLs beyond thumbnails, often no view counts, and dates that frequently cannot be resolved to an exact timestamp (those posts get `postedAt: null` and a raw `postedAtLabel` instead). Closed walls and single-post targets are not reachable at all.
 
+Neither mode ever fabricates a value. A field VK does not return is `null`, and a failed extraction fails the run rather than producing placeholder data.
 
-## Getting started
+## Output
 
-For complete information [see this article](https://docs.apify.com/platform/actors/development#build-actor-at-apify-console). In short, you will:
+One dataset item per post:
 
-1. Build the Actor
-2. Run the Actor
+```json
+{
+    "postId": "-22822305_1070789",
+    "ownerId": -22822305,
+    "authorId": -22822305,
+    "author": {
+        "id": -22822305,
+        "type": "group",
+        "name": "Кинопоиск",
+        "screenName": "kinopoisk",
+        "url": "https://vk.com/kinopoisk",
+        "photo": "https://sun.userapi.com/…",
+        "isVerified": true,
+        "membersCount": 2100000
+    },
+    "text": "Post body…",
+    "postedAt": "2024-06-01T09:30:00.000Z",
+    "editedAt": null,
+    "sourceUrl": "https://vk.com/wall-22822305_1070789",
+    "stats": { "likes": 1240, "comments": 87, "reposts": 33, "views": 98000, "engagement": 1360 },
+    "mediaTypes": ["photo", "video"],
+    "mediaCount": 2,
+    "attachments": [
+        { "type": "photo", "id": "-22822305_457301", "url": "https://sun.userapi.com/…jpg", "width": 2560, "height": 1440, "sizes": [] },
+        { "type": "video", "id": "-22822305_456789", "url": "https://vk.com/video-22822305_456789", "title": "Trailer", "durationSeconds": 132, "viewsCount": 45000 }
+    ],
+    "isRepost": false,
+    "repostChain": [],
+    "isPinned": false,
+    "isAd": false,
+    "geo": null,
+    "postSource": { "type": "vk", "platform": null },
+    "target": "kinopoisk",
+    "targetType": "handle",
+    "scrapedAt": "2024-06-02T11:00:00.000Z"
+}
+```
 
-## Pull the Actor for local development
+Attachment objects carry type-specific fields — `poll` has `question`/`answers`/`votesCount`, `link` has `url`/`title`/`description`, `doc` has `extension`/`sizeBytes`, and so on. Unmapped attachment types still appear with their `type`, `id` and `isKnownType: false`, so nothing is silently dropped. With `includeComments`, each post also gets a `comments` array whose entries carry the commenter, text, likes and nested `replies`.
 
-If you would like to develop locally, you can pull the existing Actor from Apify console using Apify CLI:
+## Limits and behaviour
 
-1. Install `apify-cli`
+- **Rate limits.** VK allows roughly 3 requests/second per user token; the Actor runs API requests one at a time and retries error code 6 with backoff.
+- **Budgets.** `maxItems` counts posts, not requests, and is enforced globally across targets. Posts are de-duplicated by `ownerId_postId`.
+- **Failure.** A run that stores zero posts fails with a diagnostic message instead of finishing "successfully" with an empty dataset. An invalid or expired token fails the run immediately.
+- **Scope.** Only public walls, or walls the supplied token can read. This Actor does not attempt to access private profiles or bypass VK's access controls.
 
-    **Using Homebrew**
+## Development
 
-    ```bash
-    brew install apify-cli
-    ```
-
-    **Using NPM**
-
-    ```bash
-    npm -g install apify-cli
-    ```
-
-2. Pull the Actor by its unique `<ActorId>`, which is one of the following:
-    - unique name of the Actor to pull (e.g. "apify/hello-world")
-    - or ID of the Actor to pull (e.g. "E2jjCZBezvAZnX8Rb")
-
-    You can find both by clicking on the Actor title at the top of the page, which will open a modal containing both Actor unique name and Actor ID.
-
-    This command will copy the Actor into the current directory on your local machine.
-
-    ```bash
-    apify pull <ActorId>
-    ```
-
-## Documentation reference
-
-To learn more about Apify and Actors, take a look at the following resources:
-
-- [Apify SDK for JavaScript documentation](https://docs.apify.com/sdk/js)
-- [Apify SDK for Python documentation](https://docs.apify.com/sdk/python)
-- [Apify Platform documentation](https://docs.apify.com/platform)
-- [Join our developer community on Discord](https://discord.com/invite/jyEM2PRvMU)
+```bash
+npm install
+npm test     # unit + handler tests, no network access
+npm run lint
+apify run    # requires an INPUT in storage/key_value_stores/default/
+```

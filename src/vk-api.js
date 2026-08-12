@@ -6,7 +6,9 @@
  */
 
 export const VK_API_VERSION = '5.199';
-export const VK_API_BASE = 'https://api.vk.com/method';
+
+/** Overridable so the crawl can be pointed at a mock or a VK API mirror. */
+export const VK_API_BASE = process.env.VK_API_BASE_URL ?? 'https://api.vk.com/method';
 
 /** wall.get / wall.getComments hard cap. */
 export const MAX_PAGE_SIZE = 100;
@@ -58,8 +60,6 @@ export const buildApiRequest = (method, params, accessToken, userData, uniqueKey
         payload: body.toString(),
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
         userData: { ...userData, method },
-        // The token is request-specific state, not part of the crawl identity.
-        skipNavigation: false,
     };
 };
 

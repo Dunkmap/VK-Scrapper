@@ -1,13 +1,14 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 
-import { Actor, log } from 'apify';
 import { CheerioCrawler } from '@crawlee/cheerio';
 import { PlaywrightCrawler } from '@crawlee/playwright';
+import { Actor, log } from 'apify';
 
 import { validateInput } from './input.js';
 import { ResultCollector } from './results.js';
-import { LABELS, createApiRouter } from './routes.js';
-import { HTML_LABELS, createHtmlRouter } from './routes-html.js';
+import { createApiRouter, LABELS } from './routes.js';
+import { createHtmlRouter, HTML_LABELS } from './routes-html.js';
+import { RunState } from './run-state.js';
 import { describeTarget } from './targets.js';
 import { buildApiRequest } from './vk-api.js';
 
@@ -20,25 +21,58 @@ Actor.on('aborting', async () => {
     await Actor.exit();
 });
 
-const input = await Actor.getInput();
-const { config, targets } = validateInput(input);
+/**
+ * Turns one parsed target into its first VK API request.
+ * @param {ReturnType<import('./targets.js').parseTarget>} target
+ * @param {object} config
+ */
+const buildStartRequest = (target, config) => {
+    const label = target.kind === 'post' ? LABELS.POST : LABELS.WALL;
+    const userData = {
+        label,
+        target: target.raw,
+        targetType: target.targetType,
+        offset: 0,
+        perTargetPushed: 0,
+        ownerId: target.ownerId ?? null,
+        domain: target.domain ?? null,
+    };
 
-const collector = new ResultCollector({ maxItems: config.maxItems });
-const runState = { fatalError: null };
+    if (target.kind === 'post') {
+        return buildApiRequest(
+            'wall.getById',
+            { posts: `${target.ownerId}_${target.postId}`, extended: 1, copy_history_depth: 5 },
+            config.accessToken,
+            userData,
+            `post:${target.ownerId}_${target.postId}`,
+        );
+    }
 
-const proxyConfiguration = await Actor.createProxyConfiguration(
-    // VK blocks most datacenter ranges; residential is the working default.
-    input.proxyConfiguration ?? { useApifyProxy: true, apifyProxyGroups: ['RESIDENTIAL'] },
-);
+    return buildApiRequest(
+        'wall.get',
+        {
+            ...(target.domain ? { domain: target.domain } : { owner_id: target.ownerId }),
+            offset: 0,
+            count: config.pageSize,
+            extended: 1,
+            filter: config.postFilter,
+            fields: 'screen_name,photo_200,verified,members_count',
+        },
+        config.accessToken,
+        userData,
+        `wall:${target.domain ?? target.ownerId}:0`,
+    );
+};
 
-if (config.mode === 'api') {
+/** Runs the official-API crawl. */
+const runApiCrawl = async ({ config, targets, collector, runState, proxyConfiguration }) => {
     const router = createApiRouter({ collector, config, runState });
 
     const crawler = new CheerioCrawler({
         proxyConfiguration,
         requestHandler: router,
         additionalMimeTypes: ['application/json'],
-        // VK caps user tokens at ~3 requests/second; one at a time keeps us clear.
+        // VK caps user tokens at roughly 3 requests/second; one at a time keeps us clear.
         maxConcurrency: 1,
         maxRequestRetries: 5,
         requestHandlerTimeoutSecs: 180,
@@ -50,7 +84,7 @@ if (config.mode === 'api') {
                 return;
             }
             if (!retry) {
-                log.softFail(`Skipping ${request.userData.target}: ${error.message}`);
+                log.softFail(`Skipping "${request.userData.target}": ${error.message}`);
                 request.noRetry = true;
             }
         },
@@ -59,51 +93,14 @@ if (config.mode === 'api') {
         },
     });
 
-    const startRequests = targets.map((target) => {
-        const label = target.kind === 'post' ? LABELS.POST : LABELS.WALL;
-        const userData = {
-            label,
-            target: target.raw,
-            targetType: target.targetType,
-            offset: 0,
-            perTargetPushed: 0,
-            ownerId: target.ownerId ?? null,
-            domain: target.domain ?? null,
-        };
+    await crawler.run(targets.map((target) => buildStartRequest(target, config)));
+};
 
-        if (target.kind === 'post') {
-            return buildApiRequest(
-                'wall.getById',
-                { posts: `${target.ownerId}_${target.postId}`, extended: 1, copy_history_depth: 5 },
-                config.accessToken,
-                userData,
-                `post:${target.ownerId}_${target.postId}`,
-            );
-        }
-
-        return buildApiRequest(
-            'wall.get',
-            {
-                ...(target.domain ? { domain: target.domain } : { owner_id: target.ownerId }),
-                offset: 0,
-                count: config.pageSize,
-                extended: 1,
-                filter: config.postFilter,
-                fields: 'screen_name,photo_200,verified,members_count',
-            },
-            config.accessToken,
-            userData,
-            `wall:${target.domain ?? target.ownerId}:0`,
-        );
-    });
-
-    await crawler.run(startRequests);
-} else {
-    const router = createHtmlRouter({ collector, config });
-
+/** Runs the token-free mobile-HTML crawl. */
+const runHtmlCrawl = async ({ config, targets, collector, proxyConfiguration }) => {
     const crawler = new PlaywrightCrawler({
         proxyConfiguration,
-        requestHandler: router,
+        requestHandler: createHtmlRouter({ collector, config }),
         maxConcurrency: 2,
         maxRequestRetries: 3,
         navigationTimeoutSecs: 60,
@@ -120,13 +117,11 @@ if (config.mode === 'api') {
 
     const startRequests = targets
         .filter((target) => {
-            if (target.kind === 'post') {
-                log.warning(
-                    `Single-post target "${describeTarget(target)}" needs API mode - supply an "accessToken". Skipping.`,
-                );
-                return false;
-            }
-            return true;
+            if (target.kind !== 'post') return true;
+            log.warning(
+                `Single-post target "${describeTarget(target)}" needs API mode - supply an "accessToken". Skipping.`,
+            );
+            return false;
         })
         .map((target) => ({
             url: target.domain
@@ -137,26 +132,49 @@ if (config.mode === 'api') {
         }));
 
     if (startRequests.length === 0) {
-        throw new Error('Every target requires API mode. Supply an "accessToken" in the input.');
+        throw new Error('Every supplied target requires API mode. Add an "accessToken" to the input.');
     }
 
     await crawler.run(startRequests);
-}
+};
 
-if (runState.fatalError) {
-    await Actor.fail(
-        `VK rejected the access token: ${runState.fatalError.message}. `
-        + 'Generate a fresh token with "wall" scope and try again.',
+try {
+    const input = await Actor.getInput();
+    const { config, targets } = validateInput(input);
+
+    const collector = new ResultCollector({ maxItems: config.maxItems });
+    const runState = new RunState();
+    const proxyConfiguration = await Actor.createProxyConfiguration(
+        // VK blocks most datacenter ranges, so residential is the working default.
+        input.proxyConfiguration ?? { useApifyProxy: true, apifyProxyGroups: ['RESIDENTIAL'] },
     );
-}
 
-if (collector.pushed === 0) {
-    // An empty dataset is almost always a misconfiguration, not a real result.
-    await Actor.fail(
-        'No posts were extracted. Check that the targets exist and are publicly readable, '
-        + 'that the date filters are not excluding everything, and that the proxy is not blocked by VK.',
-    );
-}
+    const crawlOptions = { config, targets, collector, runState, proxyConfiguration };
+    if (config.mode === 'api') {
+        await runApiCrawl(crawlOptions);
+    } else {
+        await runHtmlCrawl(crawlOptions);
+    }
 
-log.info(`Done. Extracted ${collector.pushed} post(s) from ${targets.length} target(s).`);
-await Actor.exit();
+    if (runState.fatalError) {
+        await Actor.fail(
+            `VK rejected the access token: ${runState.fatalError.message}. `
+            + 'Generate a fresh token with the "wall" scope and try again.',
+        );
+    }
+
+    if (collector.pushed === 0) {
+        // An empty dataset is almost always a misconfiguration, not a real result.
+        await Actor.fail(
+            'No posts were extracted. Check that the targets exist and are publicly readable, '
+            + 'that the date filters are not excluding everything, and that VK is not blocking the proxy.',
+        );
+    }
+
+    log.info(`Done. Extracted ${collector.pushed} post(s) from ${targets.length} target(s).`);
+    await Actor.exit();
+} catch (error) {
+    // Surface a readable reason in the Apify console instead of a raw stack trace.
+    log.exception(error, 'The run could not be completed.');
+    await Actor.fail(error.message);
+}

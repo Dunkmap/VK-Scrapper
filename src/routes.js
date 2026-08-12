@@ -3,10 +3,10 @@ import { log } from 'apify';
 
 import { buildActorIndex, normalizeComments, normalizePost } from './parse.js';
 import {
-    MAX_PAGE_SIZE,
-    VkApiError,
     buildApiRequest,
+    MAX_PAGE_SIZE,
     unwrapApiResponse,
+    VkApiError,
 } from './vk-api.js';
 
 export const LABELS = {
@@ -101,7 +101,7 @@ const fetchComments = async ({ sendRequest, ownerId, postId, maxComments, access
  * @param {object} context
  * @param {import('./results.js').ResultCollector} context.collector
  * @param {object} context.config Validated input.
- * @param {{ fatalError: Error|null }} context.runState Shared abort signal.
+ * @param {import('./run-state.js').RunState} context.runState Shared abort signal.
  * @returns {import('@crawlee/cheerio').CheerioRouter}
  */
 export const createApiRouter = ({ collector, config, runState }) => {
@@ -249,20 +249,17 @@ export const createApiRouter = ({ collector, config, runState }) => {
         throw new NonRetryableError(`Request without a routing label reached the crawler: ${request.url}`);
     });
 
-    // Distinguish "skip this target" from "retry" from "the token is dead".
-    router.use(async (ctx) => {
-        ctx.request.userData.__attempt = (ctx.request.userData.__attempt ?? 0) + 1;
-    });
-
     /**
-     * Classifies a handler error. Exposed on the router so `failedRequestHandler`
-     * and the error hook share one policy.
+     * Classifies a handler error so the crawler's error hooks share one policy:
+     * retry transient VK errors, skip the target on permanent ones, and abort
+     * the whole run when the token itself is rejected.
      * @param {Error} error
+     * @returns {{ retry: boolean, fatal?: boolean }}
      */
     router.classifyError = (error) => {
         if (!(error instanceof VkApiError)) return { retry: true };
         if (error.isFatal) {
-            runState.fatalError = error;
+            runState.recordFatal(error);
             return { retry: false, fatal: true };
         }
         return { retry: error.isRetryable };

@@ -83,7 +83,10 @@ export const parseTarget = (raw) => {
 
     const looksLikeUrl = /^(https?:\/\/)?(www\.|m\.)?vk\.(com|ru)\//i.test(value)
         || /^(https?:\/\/)?(www\.)?vkontakte\.ru\//i.test(value);
-    const targetType = looksLikeUrl ? 'url' : (/^-?\d+$/.test(value) ? 'ownerId' : 'handle');
+    const isBareOwnerId = !looksLikeUrl && /^-?\d+$/.test(value);
+    let targetType = 'handle';
+    if (looksLikeUrl) targetType = 'url';
+    else if (isBareOwnerId) targetType = 'ownerId';
 
     // 1. A bare signed owner ID, e.g. "-1" (community) or "1" (user).
     if (targetType === 'ownerId') {

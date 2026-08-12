@@ -7,6 +7,9 @@
  * tell "no data" apart from "zero".
  */
 
+/** Community kinds VK reports on `group.type`; anything else is a plain group. */
+const COMMUNITY_TYPES = new Set(['group', 'page', 'event']);
+
 /** Attachment types VK can return; anything unknown falls through to a generic shape. */
 const KNOWN_ATTACHMENT_TYPES = new Set([
     'photo', 'video', 'audio', 'doc', 'link', 'poll', 'album', 'market',
@@ -64,7 +67,7 @@ export const buildActorIndex = (response) => {
     for (const group of response?.groups ?? []) {
         index.set(-group.id, {
             id: -group.id,
-            type: group.type === 'event' ? 'event' : (group.type === 'page' ? 'page' : 'group'),
+            type: COMMUNITY_TYPES.has(group.type) ? group.type : 'group',
             name: group.name ?? null,
             screenName: group.screen_name ?? `club${group.id}`,
             url: `https://vk.com/${group.screen_name ?? `club${group.id}`}`,
@@ -351,7 +354,8 @@ export const normalizePost = (post, { index, target, targetType, includeRawPost 
         isPinned: post.is_pinned === 1,
         isAd: post.marked_as_ads === 1,
         isFavorite: post.is_favorite === true,
-        canComment: post.comments?.can_post === 1 ? true : (post.comments?.can_post === 0 ? false : null),
+        // VK omits `can_post` entirely on some walls - that is "unknown", not "no".
+        canComment: typeof post.comments?.can_post === 'number' ? post.comments.can_post === 1 : null,
         signerId: post.signer_id ?? null,
         signer: post.signer_id ? resolveActor(post.signer_id, index) : null,
         createdBy: post.created_by ?? null,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { VkApiError, buildApiRequest, parseDateBoundary, unwrapApiResponse } from '../src/vk-api.js';
+import { buildApiRequest, parseDateBoundary, unwrapApiResponse,VkApiError } from '../src/vk-api.js';
 
 describe('buildApiRequest', () => {
     const request = buildApiRequest('wall.get', { domain: 'durov', offset: 0, count: 100, skipped: null }, 'secret-token', { target: 'durov' }, 'wall:durov:0');

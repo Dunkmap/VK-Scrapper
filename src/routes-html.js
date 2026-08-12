@@ -34,7 +34,8 @@ const extractPostsInPage = () => {
     /** VK renders counters as "1.2K"/"1,2 тыс." - only trust plain integers. */
     const parseCounter = (raw) => {
         if (!raw) return null;
-        const cleaned = raw.replace(/\s| /g, '');
+        // Strip spacing, including the non-breaking space VK uses as a thousands separator.
+        const cleaned = [...raw].filter((char) => char.trim().length > 0).join('');
         if (/^\d+$/.test(cleaned)) return Number(cleaned);
         return null;
     };

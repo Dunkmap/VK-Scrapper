@@ -9,10 +9,14 @@
         "playwright": "1.61.1"
     },
     "devDependencies": {
+        "@apify/eslint-config": "^1.0.0",
+        "eslint": "^9.0.0",
+        "eslint-config-prettier": "^10.0.0",
         "vitest": "^3.0.0"
     },
     "scripts": {
         "start": "node src/main.js",
-        "test": "vitest run"
+        "test": "vitest run",
+        "lint": "eslint src test"
     }
 }
