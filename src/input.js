@@ -29,6 +29,7 @@ export const validateInput = (rawInput) => {
         includeComments = false,
         maxComments = 100,
         includeRawPost = false,
+        keepUndatedPosts = false,
     } = rawInput;
 
     if (!Array.isArray(vkTargets) || vkTargets.length === 0) {
@@ -92,6 +93,7 @@ export const validateInput = (rawInput) => {
         includeComments: mode === 'api' && includeComments === true,
         maxComments,
         includeRawPost: includeRawPost === true,
+        keepUndatedPosts: keepUndatedPosts === true,
         pageSize: Math.min(MAX_PAGE_SIZE, postsPerTarget ?? MAX_PAGE_SIZE, maxItems),
     };
 

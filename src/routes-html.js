@@ -75,18 +75,29 @@ export const extractPostsInPage = () => {
         const postId = Number(idMatch[2]);
 
         // VK sometimes stamps an absolute unix time on the date element; when it
-        // does not, the printed label is the only date available.
+        // does not, the printed label is the only date available. Markup varies by
+        // generation, so cast a wide net and fall back to any link pointing at
+        // this very post - VK renders the date as that link's text.
         const dateNode = container.querySelector(
-            'time, [data-time], .pi_date, .rel_date, .PostHeaderSubtitle__item, .post_date, .rel_date_needs_update',
+            'time, [data-time], [unixtime], [abs_time], .pi_date, .rel_date, .PostHeaderSubtitle__item,'
+            + ' .post_date, .rel_date_needs_update, .PostHeaderSubtitle__separator ~ *',
+        ) ?? container.querySelector(`a[href*="wall${ownerId}_${postId}"]`);
+
+        const dateLink = container.querySelector(
+            `.PostHeaderSubtitle__link, .post_link, a.pi_date, a[href*="wall${ownerId}_${postId}"]`,
         );
-        const dateLink = container.querySelector('.PostHeaderSubtitle__link, .post_link, a.pi_date');
-        const unix = Number(
-            dateNode?.getAttribute?.('time')
-            ?? dateNode?.getAttribute?.('data-time')
-            ?? dateNode?.getAttribute?.('unixtime')
-            ?? dateNode?.getAttribute?.('datetime')
-            ?? NaN,
-        );
+
+        const readNumericAttr = (node) => {
+            for (const attr of ['time', 'data-time', 'unixtime', 'abs_time', 'datetime']) {
+                const value = Number(node?.getAttribute?.(attr));
+                if (Number.isFinite(value) && value > 0) return value;
+            }
+            return NaN;
+        };
+        // The timestamp may sit on the date node itself or on a child span.
+        const unix = [dateNode, dateLink, ...container.querySelectorAll('[time], [data-time], [unixtime], [abs_time]')]
+            .map(readNumericAttr)
+            .find((value) => Number.isFinite(value) && value > 0) ?? NaN;
 
         // Media thumbnails only - emoji, avatars and UI sprites are not attachments.
         const isContentImage = (src) => src
@@ -121,8 +132,14 @@ export const extractPostsInPage = () => {
             // VK hides the full date in a `title` tooltip and prints a short label.
             postedAtText: dateLink?.getAttribute('title')?.trim()
                 || dateNode?.getAttribute('title')?.trim()
+                || dateLink?.textContent?.trim()
                 || dateNode?.textContent?.trim()
                 || null,
+            // Kept only when the date could not be read, so a failing selector can
+            // be diagnosed from the run log instead of guessed at.
+            headerSample: (dateNode || dateLink)
+                ? null
+                : container.innerHTML.slice(0, 400).replace(/\s+/g, ' '),
             likes: parseCounter(firstText(container, ['.PostBottomAction--like .PostBottomAction__count', '._like_count', '.v_like'])),
             comments: parseCounter(firstText(container, ['.PostBottomAction--comment .PostBottomAction__count', '._comments_count', '.v_comments'])),
             reposts: parseCounter(firstText(container, ['.PostBottomAction--share .PostBottomAction__count', '._share_count', '.v_share'])),
@@ -208,8 +225,12 @@ export const createHtmlRouter = ({ collector, config }) => {
 
             if (!postedAt) {
                 missingDates++;
-                // Never let an undated post slip through a date filter the user asked for.
-                if (hasDateFilter) {
+                if (unreadableSample === null && raw.headerSample) unreadableSample = raw.headerSample;
+                if (unreadableLabel === null && raw.postedAtText) unreadableLabel = raw.postedAtText;
+
+                // An undated post cannot be checked against a date filter. Dropping it
+                // keeps the filter honest, but the user can opt to keep it instead.
+                if (hasDateFilter && !config.keepUndatedPosts) {
                     droppedUndated++;
                     continue;
                 }

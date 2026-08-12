@@ -36,6 +36,33 @@ const matchTime = (label) => {
     return { hours, minutes };
 };
 
+/** "только что" / "just now" - within a minute of now. */
+const JUST_NOW = /^(только\s+что|just\s+now|now)$/i;
+
+/** Relative-age units VK prints on recent posts, in seconds. */
+const AGO_UNITS = [
+    { pattern: /^(сек|sec|s)/i, seconds: 1 },
+    { pattern: /^(мин|min|m)/i, seconds: 60 },
+    { pattern: /^(ч|hour|hr|h)/i, seconds: 3600 },
+    { pattern: /^(дн|день|дня|дней|day|d)/i, seconds: 86_400 },
+    { pattern: /^(нед|week|w)/i, seconds: 604_800 },
+];
+
+/**
+ * Parses "5 минут назад" / "2 ч назад" / "3 days ago".
+ * @returns {Date|null}
+ */
+const matchRelativeAge = (text, now) => {
+    const match = /^(\d+)\s*([a-zа-я]+)\.?\s*(назад|ago)$/i.exec(text);
+    if (!match) return null;
+
+    const amount = Number(match[1]);
+    const unit = AGO_UNITS.find(({ pattern }) => pattern.test(match[2]));
+    if (!unit || !Number.isFinite(amount)) return null;
+
+    return new Date(now.getTime() - amount * unit.seconds * 1000);
+};
+
 /**
  * @param {string|null|undefined} label Raw text VK printed, e.g. "12 авг в 10:30".
  * @param {Date} [now] Reference point for relative labels; defaults to the current time.
@@ -46,6 +73,12 @@ export const parseVkDateLabel = (label, now = new Date()) => {
     if (typeof label !== 'string') return null;
     const text = label.trim().toLowerCase();
     if (!text) return null;
+
+    if (JUST_NOW.test(text)) return { iso: now.toISOString(), isExact: false };
+
+    // "5 минут назад" / "2 ч назад" / "3 days ago"
+    const relative = matchRelativeAge(text, now);
+    if (relative) return { iso: relative.toISOString(), isExact: false };
 
     const time = matchTime(text);
 

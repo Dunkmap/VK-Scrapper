@@ -103,8 +103,15 @@ const runHtmlCrawl = async ({ config, targets, collector, proxyConfiguration }) 
         requestHandler: createHtmlRouter({ collector, config }),
         maxConcurrency: 2,
         maxRequestRetries: 3,
-        navigationTimeoutSecs: 60,
+        navigationTimeoutSecs: 45,
         requestHandlerTimeoutSecs: 300,
+        preNavigationHooks: [
+            async (_ctx, gotoOptions) => {
+                // VK holds sockets open for polling, so "load" never fires and every
+                // navigation burns the full timeout before succeeding anyway.
+                gotoOptions.waitUntil = 'domcontentloaded';
+            },
+        ],
         launchContext: {
             launchOptions: {
                 args: ['--disable-gpu', '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
