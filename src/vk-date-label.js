@@ -15,10 +15,18 @@ const MONTHS = new Map(Object.entries({
     jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
 }));
 
-const TODAY = /^(сегодня|today)\b/i;
-const YESTERDAY = /^(вчера|yesterday)\b/i;
+// `\b` is ASCII-only in JavaScript, so it never fires after a Cyrillic letter.
+// A lookahead for "not a letter" is the portable equivalent.
+const TODAY = /^(сегодня|today)(?![\p{L}])/iu;
+const YESTERDAY = /^(вчера|yesterday)(?![\p{L}])/iu;
 
-/** Pulls "в 10:30" / "at 10:30" / bare "10:30" out of a label. */
+/** Any clock-shaped substring, valid or not. */
+const HAS_CLOCK = /\d{1,2}:\d{2}/;
+
+/**
+ * Pulls "в 10:30" / "at 10:30" / bare "10:30" out of a label.
+ * @returns {{hours: number, minutes: number}|null}
+ */
 const matchTime = (label) => {
     const match = /(?:^|\s)(?:в|at)?\s*(\d{1,2}):(\d{2})/i.exec(label);
     if (!match) return null;
@@ -40,6 +48,10 @@ export const parseVkDateLabel = (label, now = new Date()) => {
     if (!text) return null;
 
     const time = matchTime(text);
+
+    // A malformed clock ("в 25:00") means the label is not what we think it is;
+    // silently dropping to a date-only timestamp would invent precision.
+    if (!time && HAS_CLOCK.test(text)) return null;
 
     // "сегодня в 21:04" / "вчера в 09:12"
     if (TODAY.test(text) || YESTERDAY.test(text)) {

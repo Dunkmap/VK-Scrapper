@@ -1,6 +1,8 @@
 import { createPlaywrightRouter } from '@crawlee/playwright';
 import { log } from 'apify';
 
+import { parseVkDateLabel } from './vk-date-label.js';
+
 /**
  * Best-effort DOM scraping of the VK mobile wall, used when no access token is
  * supplied.
@@ -25,8 +27,9 @@ const POST_SELECTOR = '[data-post-id], .wall_item, ._post, .post';
 /**
  * Runs in the browser: reads every wall post currently in the DOM.
  * Kept dependency-free because it is serialized into the page context.
+ * Exported so it can be exercised against fixture markup in tests.
  */
-const extractPostsInPage = () => {
+export const extractPostsInPage = () => {
     /** Buttons and badges VK renders *inside* the text node, e.g. "Show more". */
     const TEXT_CHROME = '.wall_post_more, .PostTextMore, .js-wall_post_more, .wall_post_text_more,'
         + ' .PostText__more, .show_more, .more_link';
@@ -189,15 +192,28 @@ export const createHtmlRouter = ({ collector, config }) => {
         }
 
         const scrapedAt = new Date().toISOString();
+        const hasDateFilter = Boolean(config.publishedAfter || config.publishedBefore);
         const items = [];
         let missingDates = 0;
+        let droppedUndated = 0;
 
         for (const raw of rawPosts) {
             const compositeId = `${raw.ownerId}_${raw.postId}`;
-            const postedAt = raw.postedAtUnix ? new Date(raw.postedAtUnix * 1000).toISOString() : null;
 
-            if (!postedAt) missingDates++;
-            if (postedAt) {
+            // Prefer a real timestamp; fall back to parsing the label VK printed.
+            const parsedLabel = raw.postedAtUnix ? null : parseVkDateLabel(raw.postedAtText);
+            const postedAt = raw.postedAtUnix
+                ? new Date(raw.postedAtUnix * 1000).toISOString()
+                : parsedLabel?.iso ?? null;
+
+            if (!postedAt) {
+                missingDates++;
+                // Never let an undated post slip through a date filter the user asked for.
+                if (hasDateFilter) {
+                    droppedUndated++;
+                    continue;
+                }
+            } else {
                 const date = new Date(postedAt);
                 if (config.publishedAfter && date < config.publishedAfter) continue;
                 if (config.publishedBefore && date > config.publishedBefore) continue;
@@ -245,12 +261,27 @@ export const createHtmlRouter = ({ collector, config }) => {
 
         if (missingDates > 0) {
             log.warning(
-                `[${target}] ${missingDates} post(s) had no machine-readable date in the HTML, so "postedAt" is null `
-                + 'and date filters could not be applied to them. Use an access token for exact timestamps.',
+                `[${target}] ${missingDates} post(s) had no readable date in the HTML, so "postedAt" is null. `
+                + 'Use an access token for exact timestamps.',
+            );
+        }
+        if (droppedUndated > 0) {
+            log.warning(
+                `[${target}] Dropped ${droppedUndated} undated post(s) because a date filter is set and they `
+                + 'could not be checked against it. Clear the date filters to keep them.',
             );
         }
 
-        await collector.push(items);
+        const stored = await collector.push(items);
+
+        // Under-delivery is the usual symptom of a login wall or changed markup;
+        // say so plainly instead of leaving the user to compare numbers themselves.
+        if (stored < wanted && Number.isFinite(wanted)) {
+            log.warning(
+                `[${target}] Returned ${stored} post(s) but ${wanted} were requested. VK's public HTML limits how `
+                + 'much of a wall is reachable without authentication - supply an "accessToken" for the full wall.',
+            );
+        }
     });
 
     return router;

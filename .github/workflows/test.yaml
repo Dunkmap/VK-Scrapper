@@ -16,5 +16,6 @@ jobs:
                   cache: npm
             - run: npm ci
             - run: npm run lint
-            # The test suite is offline - no browser download needed.
+            # The in-page extraction test runs against real fixture markup.
+            - run: npx playwright install --with-deps chromium
             - run: npm test
