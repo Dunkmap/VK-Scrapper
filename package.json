@@ -1,13 +1,18 @@
 {
     "name": "vk-posts-scraper",
-    "version": "0.0.1",
+    "version": "0.1.0",
     "type": "module",
     "dependencies": {
         "apify": "^3.7.2",
+        "@crawlee/cheerio": "^3.17.0",
         "@crawlee/playwright": "^3.17.0",
         "playwright": "1.61.1"
     },
+    "devDependencies": {
+        "vitest": "^3.0.0"
+    },
     "scripts": {
-        "start": "node src/main.js"
+        "start": "node src/main.js",
+        "test": "vitest run"
     }
 }

@@ -1,49 +1,98 @@
 {
-    "title": "VK Posts Scraper Configuration",
+    "title": "VK Posts Scraper",
     "type": "object",
     "schemaVersion": 1,
     "properties": {
         "vkTargets": {
             "title": "VK targets",
             "type": "array",
-            "description": "Start with a public VK handle such as durov, a profile/community URL, a wall URL, an owner ID, or a direct post URL.",
-            "editor": "json",
+            "description": "VK walls to scrape. Accepts a public handle (`durov`), a profile or community URL (`https://vk.com/kinopoisk`), a signed owner ID (`-40316705`), or a direct post link (`https://vk.com/wall1_45678`).",
+            "editor": "stringList",
             "prefill": ["kinopoisk", "durov"],
             "items": {
                 "type": "string"
             }
         },
+        "accessToken": {
+            "title": "VK access token",
+            "type": "string",
+            "description": "VK API access token with the `wall` scope. Strongly recommended: with a token the Actor uses the official VK API and returns every field (attachment URLs, view counts, exact timestamps, repost chains, comments). Without one it falls back to limited public HTML scraping.",
+            "editor": "textfield",
+            "isSecret": true,
+            "nullable": true
+        },
         "maxItems": {
-            "title": "Maximum posts",
+            "title": "Maximum posts (total)",
             "type": "integer",
-            "description": "The maximum total number of posts to scrape.",
-            "default": 500
+            "description": "Hard cap on the number of posts stored across all targets.",
+            "default": 500,
+            "minimum": 1,
+            "unit": "posts"
         },
         "postsPerTarget": {
-            "title": "Posts per target",
+            "title": "Maximum posts per target",
             "type": "integer",
-            "description": "Limit the maximum number of posts gathered per specific target.",
+            "description": "Optional per-target cap. Leave empty to let each target use the shared budget.",
+            "minimum": 1,
+            "unit": "posts",
             "nullable": true
         },
         "publishedAfter": {
             "title": "Published after",
             "type": "string",
-            "description": "Filter posts published after this date (YYYY-MM-DD format).",
-            "editor": "textfield",
+            "description": "Only keep posts published at or after this date. `YYYY-MM-DD` or a full ISO-8601 timestamp. Pagination stops once older posts are reached.",
+            "editor": "datepicker",
             "nullable": true
         },
         "publishedBefore": {
             "title": "Published before",
             "type": "string",
-            "description": "Filter posts published before this date (YYYY-MM-DD format).",
-            "editor": "textfield",
+            "description": "Only keep posts published at or before this date. A bare `YYYY-MM-DD` includes the whole day.",
+            "editor": "datepicker",
             "nullable": true
         },
-        "includeRawPost": {
-            "title": "Include raw post",
+        "postFilter": {
+            "title": "Post filter",
+            "type": "string",
+            "description": "Which posts to read from the wall. API mode only.",
+            "editor": "select",
+            "default": "all",
+            "enum": ["all", "owner", "others"],
+            "enumTitles": [
+                "All posts on the wall",
+                "Only posts by the wall owner",
+                "Only posts by other users"
+            ]
+        },
+        "includeComments": {
+            "title": "Include comments",
             "type": "boolean",
-            "description": "Include the unparsed native VK API response payload object.",
+            "description": "Fetch comment threads (including replies) for every post. Requires an access token and makes the run noticeably slower.",
             "default": false
+        },
+        "maxComments": {
+            "title": "Maximum comments per post",
+            "type": "integer",
+            "description": "Upper bound on comments fetched per post when \"Include comments\" is on.",
+            "default": 100,
+            "minimum": 1,
+            "unit": "comments"
+        },
+        "includeRawPost": {
+            "title": "Include raw VK payload",
+            "type": "boolean",
+            "description": "Attach the unmodified VK API object as `rawPost` on every item. Useful for fields this Actor does not map yet.",
+            "default": false
+        },
+        "proxyConfiguration": {
+            "title": "Proxy configuration",
+            "type": "object",
+            "description": "VK blocks most datacenter IP ranges. Residential proxies are used by default.",
+            "editor": "proxy",
+            "default": {
+                "useApifyProxy": true,
+                "apifyProxyGroups": ["RESIDENTIAL"]
+            }
         }
     },
     "required": ["vkTargets"]

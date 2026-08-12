@@ -1,13 +1,12 @@
 {
     "$schema": "https://apify.com/schemas/v1/actor.ide.json",
     "actorSpecification": 1,
-    "name": "my-actor-2",
-    "title": "Project Playwright Crawler JavaScript",
-    "description": "Crawlee and Playwright project in JavaScript.",
-    "version": "0.0",
+    "name": "vk-posts-scraper",
+    "title": "VK Posts Scraper",
+    "description": "Extracts full VK wall posts - text, author, stats, attachment URLs, repost chains and comments - from public profiles and communities.",
+    "version": "0.1",
     "meta": {
-        "templateId": "js-crawlee-playwright-chrome",
-        "generatedBy": "<FILL-IN-MODEL>"
+        "templateId": "js-crawlee-playwright-chrome"
     },
     "inputSchema": "./input_schema.json",
     "outputSchema": "./output_schema.json",
