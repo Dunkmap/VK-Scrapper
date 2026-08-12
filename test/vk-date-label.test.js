@@ -40,6 +40,28 @@ describe('parseVkDateLabel', () => {
         expect(parseVkDateLabel(label, NOW).iso).toBe(expected);
     });
 
+    it.each([
+        ['5 минут назад', '2024-08-12T14:55:00.000Z'],
+        ['5 мин назад', '2024-08-12T14:55:00.000Z'],
+        ['2 часа назад', '2024-08-12T13:00:00.000Z'],
+        ['2 ч назад', '2024-08-12T13:00:00.000Z'],
+        ['3 дня назад', '2024-08-09T15:00:00.000Z'],
+        ['3 days ago', '2024-08-09T15:00:00.000Z'],
+        ['30 sec ago', '2024-08-12T14:59:30.000Z'],
+        ['1 week ago', '2024-08-05T15:00:00.000Z'],
+    ])('resolves the relative age %s', (label, expected) => {
+        expect(parseVkDateLabel(label, NOW).iso).toBe(expected);
+    });
+
+    it('treats "только что" as now, flagged approximate', () => {
+        expect(parseVkDateLabel('только что', NOW)).toEqual({ iso: NOW.toISOString(), isExact: false });
+        expect(parseVkDateLabel('just now', NOW).iso).toBe(NOW.toISOString());
+    });
+
+    it('marks relative ages as approximate, not exact', () => {
+        expect(parseVkDateLabel('2 ч назад', NOW).isExact).toBe(false);
+    });
+
     it('flags whether a time of day was present', () => {
         expect(parseVkDateLabel('12 авг 2024 в 10:30', NOW).isExact).toBe(true);
         expect(parseVkDateLabel('12 авг 2024', NOW).isExact).toBe(false);
@@ -55,8 +77,8 @@ describe('parseVkDateLabel', () => {
         [null, 'null'],
         [undefined, 'undefined'],
         [42, 'a number'],
-        ['just now', 'an unparseable phrase'],
-        ['только что', 'the Russian "just now"'],
+        ['recently', 'a vague phrase with no anchor'],
+        ['много лет назад', 'a relative age with no number'],
         ['32 авг 2024', 'an impossible day'],
         ['31 фев 2024', 'a day that overflows its month'],
         ['12 xyz 2024', 'an unknown month'],

@@ -109,6 +109,8 @@ const runHtmlCrawl = async ({ config, targets, collector, proxyConfiguration }) 
             async (_ctx, gotoOptions) => {
                 // VK holds sockets open for polling, so "load" never fires and every
                 // navigation burns the full timeout before succeeding anyway.
+                // Crawlee's hook contract is to mutate this object in place.
+                // eslint-disable-next-line no-param-reassign
                 gotoOptions.waitUntil = 'domcontentloaded';
             },
         ],

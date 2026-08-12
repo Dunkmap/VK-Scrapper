@@ -78,6 +78,12 @@
             "minimum": 1,
             "unit": "comments"
         },
+        "keepUndatedPosts": {
+            "title": "Keep posts with no readable date",
+            "type": "boolean",
+            "description": "Without an access token VK sometimes hides a post's date. By default such posts are dropped when a date filter is set, because they cannot be checked against it. Turn this on to keep them (their `postedAt` will be null and they may fall outside your date range).",
+            "default": false
+        },
         "includeRawPost": {
             "title": "Include raw VK payload",
             "type": "boolean",

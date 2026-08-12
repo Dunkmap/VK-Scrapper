@@ -213,6 +213,8 @@ export const createHtmlRouter = ({ collector, config }) => {
         const items = [];
         let missingDates = 0;
         let droppedUndated = 0;
+        let unreadableSample = null;
+        let unreadableLabel = null;
 
         for (const raw of rawPosts) {
             const compositeId = `${raw.ownerId}_${raw.postId}`;
@@ -282,14 +284,20 @@ export const createHtmlRouter = ({ collector, config }) => {
 
         if (missingDates > 0) {
             log.warning(
-                `[${target}] ${missingDates} post(s) had no readable date in the HTML, so "postedAt" is null. `
+                `[${target}] ${missingDates} of ${rawPosts.length} post(s) had no readable date, so "postedAt" is null. `
                 + 'Use an access token for exact timestamps.',
             );
+            // Say which half of the pipeline failed: finding the label, or parsing it.
+            if (unreadableLabel !== null) {
+                log.warning(`[${target}] A date label was found but not understood: "${unreadableLabel}".`);
+            } else if (unreadableSample !== null) {
+                log.warning(`[${target}] No date element matched. Post markup starts: ${unreadableSample}`);
+            }
         }
         if (droppedUndated > 0) {
             log.warning(
-                `[${target}] Dropped ${droppedUndated} undated post(s) because a date filter is set and they `
-                + 'could not be checked against it. Clear the date filters to keep them.',
+                `[${target}] Dropped ${droppedUndated} undated post(s): a date filter is set and they cannot be `
+                + 'checked against it. Clear "publishedAfter"/"publishedBefore", or set "keepUndatedPosts" to keep them.',
             );
         }
 
