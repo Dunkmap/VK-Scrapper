@@ -66,19 +66,22 @@ const matchRelativeAge = (text, now) => {
 /**
  * @param {string|null|undefined} label Raw text VK printed, e.g. "12 авг в 10:30".
  * @param {Date} [now] Reference point for relative labels; defaults to the current time.
- * @returns {{ iso: string, isExact: boolean }|null} `isExact` is false when the
- *   label carried no time of day, so the timestamp is the start of that date.
+ * @returns {{ iso: string, isExact: boolean, isWallClock: boolean }|null}
+ *   `isExact` is false when the label carried no time of day, so the timestamp is
+ *   the start of that date. `isWallClock` is true when the label stated a clock
+ *   time, which VK prints in the viewer timezone - the caller must shift it.
+ *   Relative labels ("2 ч назад") are timezone-independent and already absolute.
  */
 export const parseVkDateLabel = (label, now = new Date()) => {
     if (typeof label !== 'string') return null;
     const text = label.trim().toLowerCase();
     if (!text) return null;
 
-    if (JUST_NOW.test(text)) return { iso: now.toISOString(), isExact: false };
+    if (JUST_NOW.test(text)) return { iso: now.toISOString(), isExact: false, isWallClock: false };
 
     // "5 минут назад" / "2 ч назад" / "3 days ago"
     const relative = matchRelativeAge(text, now);
-    if (relative) return { iso: relative.toISOString(), isExact: false };
+    if (relative) return { iso: relative.toISOString(), isExact: false, isWallClock: false };
 
     const time = matchTime(text);
 
@@ -93,7 +96,7 @@ export const parseVkDateLabel = (label, now = new Date()) => {
             now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), time.hours, time.minutes,
         ));
         if (YESTERDAY.test(text)) date.setUTCDate(date.getUTCDate() - 1);
-        return { iso: date.toISOString(), isExact: true };
+        return { iso: date.toISOString(), isExact: true, isWallClock: true };
     }
 
     // "12 авг 2024 в 10:30" / "12 авг в 10:30" / "12 aug 2024"
@@ -116,5 +119,5 @@ export const parseVkDateLabel = (label, now = new Date()) => {
         date.setUTCFullYear(year - 1);
     }
 
-    return { iso: date.toISOString(), isExact: Boolean(time) };
+    return { iso: date.toISOString(), isExact: Boolean(time), isWallClock: Boolean(time) };
 };

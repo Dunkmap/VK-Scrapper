@@ -84,6 +84,15 @@
             "description": "Without an access token VK sometimes hides a post's date. By default such posts are dropped when a date filter is set, because they cannot be checked against it. Turn this on to keep them (their `postedAt` will be null and they may fall outside your date range).",
             "default": false
         },
+        "htmlTimezoneOffsetMinutes": {
+            "title": "VK display timezone offset (minutes)",
+            "type": "integer",
+            "description": "Only used without an access token. VK prints post times in its display timezone (Moscow, UTC+3 = 180) rather than UTC, so this offset is subtracted to produce a correct `postedAt`. Set to 0 if your proxy region makes VK render times in UTC. Posts labelled relatively (\"2 hours ago\") are unaffected.",
+            "default": 180,
+            "minimum": -840,
+            "maximum": 840,
+            "unit": "minutes"
+        },
         "includeRawPost": {
             "title": "Include raw VK payload",
             "type": "boolean",

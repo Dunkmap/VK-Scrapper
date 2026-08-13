@@ -30,6 +30,7 @@ export const validateInput = (rawInput) => {
         maxComments = 100,
         includeRawPost = false,
         keepUndatedPosts = false,
+        htmlTimezoneOffsetMinutes = 180,
     } = rawInput;
 
     if (!Array.isArray(vkTargets) || vkTargets.length === 0) {
@@ -63,6 +64,10 @@ export const validateInput = (rawInput) => {
     if (!Number.isInteger(maxComments) || maxComments < 1) {
         throw new Error('"maxComments" must be a positive integer.');
     }
+    if (!Number.isInteger(htmlTimezoneOffsetMinutes)
+        || htmlTimezoneOffsetMinutes < -840 || htmlTimezoneOffsetMinutes > 840) {
+        throw new Error('"htmlTimezoneOffsetMinutes" must be a whole number of minutes between -840 and 840.');
+    }
 
     const after = parseDateBoundary(publishedAfter, 'start', 'publishedAfter');
     const before = parseDateBoundary(publishedBefore, 'end', 'publishedBefore');
@@ -94,6 +99,7 @@ export const validateInput = (rawInput) => {
         maxComments,
         includeRawPost: includeRawPost === true,
         keepUndatedPosts: keepUndatedPosts === true,
+        htmlTimezoneOffsetMinutes,
         pageSize: Math.min(MAX_PAGE_SIZE, postsPerTarget ?? MAX_PAGE_SIZE, maxItems),
     };
 

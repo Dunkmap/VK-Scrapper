@@ -53,6 +53,17 @@ describe('parseVkDateLabel', () => {
         expect(parseVkDateLabel(label, NOW).iso).toBe(expected);
     });
 
+    it.each([
+        ['12 авг 2024 в 10:30', true],
+        ['сегодня в 21:04', true],
+        ['вчера в 09:12', true],
+        ['12 авг 2024', false],
+        ['2 ч назад', false],
+        ['только что', false],
+    ])('marks %s as wall-clock=%s so the caller knows whether to shift it', (label, expected) => {
+        expect(parseVkDateLabel(label, NOW).isWallClock).toBe(expected);
+    });
+
     it('treats "только что" as now, flagged approximate', () => {
         expect(parseVkDateLabel('только что', NOW)).toEqual({ iso: NOW.toISOString(), isExact: false });
         expect(parseVkDateLabel('just now', NOW).iso).toBe(NOW.toISOString());
