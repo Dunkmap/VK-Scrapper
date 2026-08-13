@@ -65,7 +65,8 @@ describe('parseVkDateLabel', () => {
     });
 
     it('treats "только что" as now, flagged approximate', () => {
-        expect(parseVkDateLabel('только что', NOW)).toEqual({ iso: NOW.toISOString(), isExact: false });
+        expect(parseVkDateLabel('только что', NOW))
+            .toEqual({ iso: NOW.toISOString(), isExact: false, isWallClock: false });
         expect(parseVkDateLabel('just now', NOW).iso).toBe(NOW.toISOString());
     });
 
