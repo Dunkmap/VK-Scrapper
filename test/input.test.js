@@ -85,6 +85,19 @@ describe('validateInput', () => {
         expect(config.publishedBefore.toISOString()).toBe('2024-01-31T23:59:59.999Z');
     });
 
+    it('defaults the HTML display timezone to Moscow', () => {
+        expect(withToken().config.htmlTimezone).toBe('Europe/Moscow');
+    });
+
+    it('accepts any valid IANA zone', () => {
+        expect(withToken({ htmlTimezone: 'America/New_York' }).config.htmlTimezone).toBe('America/New_York');
+        expect(withToken({ htmlTimezone: 'UTC' }).config.htmlTimezone).toBe('UTC');
+    });
+
+    it.each(['Mars/Olympus', 'UTC+3', '', 180, null])('rejects the invalid zone %s', (htmlTimezone) => {
+        expect(() => withToken({ htmlTimezone })).toThrow(/htmlTimezone/);
+    });
+
     it('never requests a page larger than the budget', () => {
         expect(withToken({ maxItems: 10 }).config.pageSize).toBe(10);
         expect(withToken({ postsPerTarget: 5 }).config.pageSize).toBe(5);

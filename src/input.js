@@ -2,6 +2,7 @@ import { log } from 'apify';
 
 import { describeTarget, parseTarget } from './targets.js';
 import { MAX_PAGE_SIZE, parseDateBoundary } from './vk-api.js';
+import { isValidTimeZone } from './vk-date-label.js';
 
 const VALID_POST_FILTERS = new Set(['all', 'owner', 'others']);
 
@@ -30,7 +31,7 @@ export const validateInput = (rawInput) => {
         maxComments = 100,
         includeRawPost = false,
         keepUndatedPosts = false,
-        htmlTimezoneOffsetMinutes = 180,
+        htmlTimezone = 'Europe/Moscow',
     } = rawInput;
 
     if (!Array.isArray(vkTargets) || vkTargets.length === 0) {
@@ -64,9 +65,8 @@ export const validateInput = (rawInput) => {
     if (!Number.isInteger(maxComments) || maxComments < 1) {
         throw new Error('"maxComments" must be a positive integer.');
     }
-    if (!Number.isInteger(htmlTimezoneOffsetMinutes)
-        || htmlTimezoneOffsetMinutes < -840 || htmlTimezoneOffsetMinutes > 840) {
-        throw new Error('"htmlTimezoneOffsetMinutes" must be a whole number of minutes between -840 and 840.');
+    if (typeof htmlTimezone !== 'string' || !isValidTimeZone(htmlTimezone)) {
+        throw new Error(`"htmlTimezone" must be an IANA timezone name such as "Europe/Moscow", got "${htmlTimezone}".`);
     }
 
     const after = parseDateBoundary(publishedAfter, 'start', 'publishedAfter');
@@ -99,7 +99,7 @@ export const validateInput = (rawInput) => {
         maxComments,
         includeRawPost: includeRawPost === true,
         keepUndatedPosts: keepUndatedPosts === true,
-        htmlTimezoneOffsetMinutes,
+        htmlTimezone,
         pageSize: Math.min(MAX_PAGE_SIZE, postsPerTarget ?? MAX_PAGE_SIZE, maxItems),
     };
 

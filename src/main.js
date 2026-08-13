@@ -117,6 +117,11 @@ const runHtmlCrawl = async ({ config, targets, collector, proxyConfiguration }) 
         launchContext: {
             launchOptions: {
                 args: ['--disable-gpu', '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+                // VK prints post times in the viewer's timezone. Residential proxies
+                // exit in a different country each run, so without pinning these the
+                // same wall yields differently-shifted timestamps every time.
+                timezoneId: config.htmlTimezone,
+                locale: 'ru-RU',
             },
         },
         failedRequestHandler: ({ request }, error) => {

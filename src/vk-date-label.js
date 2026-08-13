@@ -36,6 +36,65 @@ const matchTime = (label) => {
     return { hours, minutes };
 };
 
+/**
+ * Reads the calendar fields a given instant has inside `timeZone`.
+ * @param {Date} date @param {string} timeZone IANA zone name.
+ */
+const zonedParts = (date, timeZone) => {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        hour12: false,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+    });
+
+    const parts = {};
+    for (const { type, value } of formatter.formatToParts(date)) parts[type] = value;
+
+    return {
+        year: Number(parts.year),
+        month: Number(parts.month) - 1,
+        day: Number(parts.day),
+        // Some engines render midnight as hour 24.
+        hours: parts.hour === '24' ? 0 : Number(parts.hour),
+        minutes: Number(parts.minute),
+        seconds: Number(parts.second),
+    };
+};
+
+/** How far `timeZone` is ahead of UTC at a given instant, in milliseconds. */
+const zoneOffsetMs = (date, timeZone) => {
+    const p = zonedParts(date, timeZone);
+    return Date.UTC(p.year, p.month, p.day, p.hours, p.minutes, p.seconds) - date.getTime();
+};
+
+/**
+ * Converts a wall-clock reading in `timeZone` to the instant it denotes.
+ * Resolved twice so daylight-saving boundaries land on the correct side.
+ */
+const wallClockToUtc = ({ year, month, day, hours = 0, minutes = 0 }, timeZone) => {
+    const naive = Date.UTC(year, month, day, hours, minutes);
+    const firstPass = naive - zoneOffsetMs(new Date(naive), timeZone);
+    return new Date(naive - zoneOffsetMs(new Date(firstPass), timeZone));
+};
+
+/**
+ * @param {string} timeZone
+ * @returns {boolean} Whether the runtime recognises this IANA zone.
+ */
+export const isValidTimeZone = (timeZone) => {
+    try {
+        new Intl.DateTimeFormat('en-US', { timeZone }).format();
+        return true;
+    } catch {
+        return false;
+    }
+};
+
 /** "только что" / "just now" - within a minute of now. */
 const JUST_NOW = /^(только\s+что|just\s+now|now)$/i;
 
@@ -65,23 +124,24 @@ const matchRelativeAge = (text, now) => {
 
 /**
  * @param {string|null|undefined} label Raw text VK printed, e.g. "12 авг в 10:30".
- * @param {Date} [now] Reference point for relative labels; defaults to the current time.
- * @returns {{ iso: string, isExact: boolean, isWallClock: boolean }|null}
- *   `isExact` is false when the label carried no time of day, so the timestamp is
- *   the start of that date. `isWallClock` is true when the label stated a clock
- *   time, which VK prints in the viewer timezone - the caller must shift it.
- *   Relative labels ("2 ч назад") are timezone-independent and already absolute.
+ * @param {object} [options]
+ * @param {Date} [options.now] Reference point for relative labels.
+ * @param {string} [options.timeZone] IANA zone VK rendered the label in. Clock
+ *   readings are wall-clock times in this zone; relative ages ("2 ч назад") are
+ *   zone-independent and are never shifted.
+ * @returns {{ iso: string, isExact: boolean }|null} `isExact` is false when the
+ *   label carried no time of day, so the timestamp is the start of that date.
  */
-export const parseVkDateLabel = (label, now = new Date()) => {
+export const parseVkDateLabel = (label, { now = new Date(), timeZone = 'UTC' } = {}) => {
     if (typeof label !== 'string') return null;
     const text = label.trim().toLowerCase();
     if (!text) return null;
 
-    if (JUST_NOW.test(text)) return { iso: now.toISOString(), isExact: false, isWallClock: false };
+    if (JUST_NOW.test(text)) return { iso: now.toISOString(), isExact: false };
 
-    // "5 минут назад" / "2 ч назад" / "3 days ago"
+    // "5 минут назад" / "2 ч назад" / "3 days ago" - an age, not a clock reading.
     const relative = matchRelativeAge(text, now);
-    if (relative) return { iso: relative.toISOString(), isExact: false, isWallClock: false };
+    if (relative) return { iso: relative.toISOString(), isExact: false };
 
     const time = matchTime(text);
 
@@ -89,14 +149,16 @@ export const parseVkDateLabel = (label, now = new Date()) => {
     // silently dropping to a date-only timestamp would invent precision.
     if (!time && HAS_CLOCK.test(text)) return null;
 
-    // "сегодня в 21:04" / "вчера в 09:12"
+    // "сегодня в 21:04" / "вчера в 09:12" - relative to today *in VK's zone*.
     if (TODAY.test(text) || YESTERDAY.test(text)) {
         if (!time) return null;
-        const date = new Date(Date.UTC(
-            now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), time.hours, time.minutes,
-        ));
+        const today = zonedParts(now, timeZone);
+        const date = wallClockToUtc(
+            { year: today.year, month: today.month, day: today.day, ...time },
+            timeZone,
+        );
         if (YESTERDAY.test(text)) date.setUTCDate(date.getUTCDate() - 1);
-        return { iso: date.toISOString(), isExact: true, isWallClock: true };
+        return { iso: date.toISOString(), isExact: true };
     }
 
     // "12 авг 2024 в 10:30" / "12 авг в 10:30" / "12 aug 2024"
@@ -107,17 +169,24 @@ export const parseVkDateLabel = (label, now = new Date()) => {
     const month = MONTHS.get(dayMonth[2].slice(0, 3));
     if (month === undefined || day < 1 || day > 31) return null;
 
-    // VK omits the year for posts from the current year.
-    const year = dayMonth[3] ? Number(dayMonth[3]) : now.getUTCFullYear();
-    const date = new Date(Date.UTC(year, month, day, time?.hours ?? 0, time?.minutes ?? 0));
-
     // Guard against overflow like "31 фев" silently rolling into March.
-    if (date.getUTCMonth() !== month || date.getUTCDate() !== day) return null;
+    const probe = new Date(Date.UTC(2000, month, day));
+    if (probe.getUTCMonth() !== month || probe.getUTCDate() !== day) return null;
+
+    // VK omits the year for posts from the current year.
+    const labelledYear = dayMonth[3] ? Number(dayMonth[3]) : zonedParts(now, timeZone).year;
+    let date = wallClockToUtc(
+        { year: labelledYear, month, day, hours: time?.hours ?? 0, minutes: time?.minutes ?? 0 },
+        timeZone,
+    );
 
     // A yearless label can only mean the past; if it lands in the future, VK meant last year.
     if (!dayMonth[3] && date.getTime() > now.getTime()) {
-        date.setUTCFullYear(year - 1);
+        date = wallClockToUtc(
+            { year: labelledYear - 1, month, day, hours: time?.hours ?? 0, minutes: time?.minutes ?? 0 },
+            timeZone,
+        );
     }
 
-    return { iso: date.toISOString(), isExact: Boolean(time), isWallClock: Boolean(time) };
+    return { iso: date.toISOString(), isExact: Boolean(time) };
 };

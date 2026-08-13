@@ -220,18 +220,14 @@ export const createHtmlRouter = ({ collector, config }) => {
             const compositeId = `${raw.ownerId}_${raw.postId}`;
 
             // Prefer a real timestamp; fall back to parsing the label VK printed.
-            const parsedLabel = raw.postedAtUnix ? null : parseVkDateLabel(raw.postedAtText);
-            let postedAt = raw.postedAtUnix
+            // The browser's timezone is pinned to `htmlTimezone`, so VK renders clock
+            // times in that zone and the parser can resolve them to exact instants.
+            const parsedLabel = raw.postedAtUnix
+                ? null
+                : parseVkDateLabel(raw.postedAtText, { timeZone: config.htmlTimezone });
+            const postedAt = raw.postedAtUnix
                 ? new Date(raw.postedAtUnix * 1000).toISOString()
                 : parsedLabel?.iso ?? null;
-
-            // A printed clock time is in VK's display timezone, not UTC. Shift it.
-            // Relative labels ("2 ч назад") are already absolute and must not move.
-            if (postedAt && parsedLabel?.isWallClock && config.htmlTimezoneOffsetMinutes !== 0) {
-                postedAt = new Date(
-                    new Date(postedAt).getTime() - config.htmlTimezoneOffsetMinutes * 60_000,
-                ).toISOString();
-            }
 
             if (!postedAt) {
                 missingDates++;

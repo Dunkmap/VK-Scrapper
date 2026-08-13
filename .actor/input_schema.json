@@ -8,7 +8,10 @@
             "type": "array",
             "description": "VK walls to scrape. Accepts a public handle (`durov`), a profile or community URL (`https://vk.com/kinopoisk`), a signed owner ID (`-40316705`), or a direct post link (`https://vk.com/wall1_45678`).",
             "editor": "stringList",
-            "prefill": ["kinopoisk", "durov"],
+            "prefill": [
+                "kinopoisk",
+                "durov"
+            ],
             "items": {
                 "type": "string"
             }
@@ -57,7 +60,11 @@
             "description": "Which posts to read from the wall. API mode only.",
             "editor": "select",
             "default": "all",
-            "enum": ["all", "owner", "others"],
+            "enum": [
+                "all",
+                "owner",
+                "others"
+            ],
             "enumTitles": [
                 "All posts on the wall",
                 "Only posts by the wall owner",
@@ -84,14 +91,12 @@
             "description": "Without an access token VK sometimes hides a post's date. By default such posts are dropped when a date filter is set, because they cannot be checked against it. Turn this on to keep them (their `postedAt` will be null and they may fall outside your date range).",
             "default": false
         },
-        "htmlTimezoneOffsetMinutes": {
-            "title": "VK display timezone offset (minutes)",
-            "type": "integer",
-            "description": "Only used without an access token. VK prints post times in its display timezone (Moscow, UTC+3 = 180) rather than UTC, so this offset is subtracted to produce a correct `postedAt`. Set to 0 if your proxy region makes VK render times in UTC. Posts labelled relatively (\"2 hours ago\") are unaffected.",
-            "default": 180,
-            "minimum": -840,
-            "maximum": 840,
-            "unit": "minutes"
+        "htmlTimezone": {
+            "title": "VK display timezone",
+            "type": "string",
+            "description": "Only used without an access token. VK prints post times in the viewer timezone, so the browser is pinned to this zone and the printed times are interpreted in it. Change it only if you want timestamps resolved as another region would see them.",
+            "editor": "textfield",
+            "default": "Europe/Moscow"
         },
         "includeRawPost": {
             "title": "Include raw VK payload",
@@ -106,9 +111,13 @@
             "editor": "proxy",
             "default": {
                 "useApifyProxy": true,
-                "apifyProxyGroups": ["RESIDENTIAL"]
+                "apifyProxyGroups": [
+                    "RESIDENTIAL"
+                ]
             }
         }
     },
-    "required": ["vkTargets"]
+    "required": [
+        "vkTargets"
+    ]
 }
