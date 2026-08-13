@@ -61,7 +61,14 @@ export const extractPostsInPage = () => {
     };
 
     const containers = document.querySelectorAll('[data-post-id], .wall_item, ._post, .post');
-    const results = [];
+
+    // VK renders the same post more than once - a pinned post repeats further down
+    // the wall, and some layouts nest a wrapper around the post body. Keyed by ID so
+    // the caller sees each post once, keeping whichever copy carries the most data.
+    const byId = new Map();
+    const richness = (post) => (post.text?.length ?? 0)
+        + post.thumbnails.length * 50
+        + (post.postedAtUnix || post.postedAtText ? 100 : 0);
 
     for (const container of containers) {
         const html = container.innerHTML ?? '';
@@ -124,7 +131,7 @@ export const extractPostsInPage = () => {
         // A thumbnail with no recognised container is still media - report it rather than lose it.
         if (mediaTypes.length === 0 && thumbnails.length > 0) mediaTypes.push('photo');
 
-        results.push({
+        const post = {
             ownerId,
             postId,
             text: firstText(container, ['.pi_text', '.wall_post_text', '.PostText', '.post_info .wall_post_text']) ?? '',
@@ -148,8 +155,14 @@ export const extractPostsInPage = () => {
             isRepost: !!container.querySelector('.copy_quote, .PostCopyQuote, .wi_copy'),
             thumbnails,
             mediaTypes,
-        });
+        };
+
+        const key = `${ownerId}_${postId}`;
+        const existing = byId.get(key);
+        if (!existing || richness(post) > richness(existing)) byId.set(key, post);
     }
+
+    const results = [...byId.values()];
 
     return results;
 };

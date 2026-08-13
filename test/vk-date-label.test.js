@@ -53,6 +53,30 @@ describe('parseVkDateLabel', () => {
         expect(parseVkDateLabel(label, { now: NOW }).iso).toBe(expected);
     });
 
+    // Regression: VK served "four hours ago" and the digits-only pattern missed it.
+    it.each([
+        ['four hours ago', '2024-08-12T11:00:00.000Z'],
+        ['an hour ago', '2024-08-12T14:00:00.000Z'],
+        ['a minute ago', '2024-08-12T14:59:00.000Z'],
+        ['one day ago', '2024-08-11T15:00:00.000Z'],
+        ['two weeks ago', '2024-07-29T15:00:00.000Z'],
+        ['twelve minutes ago', '2024-08-12T14:48:00.000Z'],
+        ['три часа назад', '2024-08-12T12:00:00.000Z'],
+        ['две недели назад', '2024-07-29T15:00:00.000Z'],
+    ])('resolves the spelled-out age %s', (label, expected) => {
+        expect(parseVkDateLabel(label, { now: NOW }).iso).toBe(expected);
+    });
+
+    it('does not mistake months for minutes', () => {
+        // A loose /^m/ unit pattern once read "months" as "minutes".
+        expect(parseVkDateLabel('3 months ago', { now: NOW })).toBeNull();
+        expect(parseVkDateLabel('a month ago', { now: NOW })).toBeNull();
+    });
+
+    it('does not approximate ages coarser than a week', () => {
+        expect(parseVkDateLabel('2 years ago', { now: NOW })).toBeNull();
+    });
+
     it('treats "только что" as now, flagged approximate', () => {
         expect(parseVkDateLabel('только что', { now: NOW }))
             .toEqual({ iso: NOW.toISOString(), isExact: false });

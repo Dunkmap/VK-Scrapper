@@ -98,26 +98,53 @@ export const isValidTimeZone = (timeZone) => {
 /** "только что" / "just now" - within a minute of now. */
 const JUST_NOW = /^(только\s+что|just\s+now|now)$/i;
 
-/** Relative-age units VK prints on recent posts, in seconds. */
+/**
+ * Relative-age units VK prints on recent posts, in seconds. Patterns are fully
+ * anchored: a loose `/^m/` would read "months" as minutes.
+ *
+ * Months and years are deliberately absent. VK switches to an absolute date well
+ * before then, and approximating a month as 30 days would put a post up to two
+ * weeks from where it belongs - worse than reporting no date at all.
+ */
 const AGO_UNITS = [
-    { pattern: /^(сек|sec|s)/i, seconds: 1 },
-    { pattern: /^(мин|min|m)/i, seconds: 60 },
-    { pattern: /^(ч|hour|hr|h)/i, seconds: 3600 },
-    { pattern: /^(дн|день|дня|дней|day|d)/i, seconds: 86_400 },
-    { pattern: /^(нед|week|w)/i, seconds: 604_800 },
+    { pattern: /^(с|сек|секунд\w*|s|sec|secs|second|seconds)$/i, seconds: 1 },
+    { pattern: /^(м|мин|минут\w*|m|min|mins|minute|minutes)$/i, seconds: 60 },
+    { pattern: /^(ч|час|часа|часов|h|hr|hrs|hour|hours)$/i, seconds: 3600 },
+    { pattern: /^(д|дн|дня|дней|день|d|day|days)$/i, seconds: 86_400 },
+    { pattern: /^(нед|недел\w*|w|wk|week|weeks)$/i, seconds: 604_800 },
 ];
 
 /**
- * Parses "5 минут назад" / "2 ч назад" / "3 days ago".
+ * VK spells small counts as words ("four hours ago"), so digits alone are not
+ * enough. Indefinite articles ("an hour ago") mean one.
+ */
+const WORD_NUMBERS = new Map(Object.entries({
+    a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6,
+    seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
+    один: 1, одну: 1, одна: 1, два: 2, две: 2, три: 3, четыре: 4, пять: 5,
+    шесть: 6, семь: 7, восемь: 8, девять: 9, десять: 10,
+}));
+
+/**
+ * @param {string} token A digit string or a number word.
+ * @returns {number|null}
+ */
+const readAmount = (token) => {
+    if (/^\d+$/.test(token)) return Number(token);
+    return WORD_NUMBERS.get(token) ?? null;
+};
+
+/**
+ * Parses "5 минут назад" / "2 ч назад" / "3 days ago" / "four hours ago".
  * @returns {Date|null}
  */
 const matchRelativeAge = (text, now) => {
-    const match = /^(\d+)\s*([a-zа-я]+)\.?\s*(назад|ago)$/i.exec(text);
+    const match = /^([a-zа-я]+|\d+)\s*([a-zа-я]+)\.?\s*(назад|ago)$/i.exec(text);
     if (!match) return null;
 
-    const amount = Number(match[1]);
+    const amount = readAmount(match[1]);
     const unit = AGO_UNITS.find(({ pattern }) => pattern.test(match[2]));
-    if (!unit || !Number.isFinite(amount)) return null;
+    if (unit === undefined || amount === null || !Number.isFinite(amount)) return null;
 
     return new Date(now.getTime() - amount * unit.seconds * 1000);
 };
