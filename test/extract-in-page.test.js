@@ -42,6 +42,11 @@ const FIXTURE = `
     <div class="wall_post_text">Second post</div>
     <div class="copy_quote">quoted</div>
   </div>
+
+  <!-- VK repeats a pinned post further down the wall, often with less markup. -->
+  <div class="_post post" data-post-id="-220754053_278529">
+    <div class="wall_post_text">Short</div>
+  </div>
 </body></html>`;
 
 describe('extractPostsInPage (real browser)', () => {
@@ -62,6 +67,17 @@ describe('extractPostsInPage (real browser)', () => {
     it('finds every post container', () => {
         expect(posts).toHaveLength(2);
         expect(posts[0]).toMatchObject({ ownerId: -220754053, postId: 278529 });
+    });
+
+    it('returns each post once even when VK repeats the container', () => {
+        const ids = posts.map((post) => `${post.ownerId}_${post.postId}`);
+        expect(new Set(ids).size).toBe(ids.length);
+    });
+
+    it('keeps the richest copy of a duplicated post, not the last one seen', () => {
+        const post = posts.find((candidate) => candidate.postId === 278529);
+        expect(post.text).not.toBe('Short');
+        expect(post.thumbnails.length).toBeGreaterThan(0);
     });
 
     it('strips the "Show more" button out of the post text', () => {

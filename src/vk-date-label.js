@@ -106,12 +106,13 @@ const JUST_NOW = /^(только\s+что|just\s+now|now)$/i;
  * before then, and approximating a month as 30 days would put a post up to two
  * weeks from where it belongs - worse than reporting no date at all.
  */
+// `\w` is ASCII-only in JavaScript, so Cyrillic suffixes need `\p{L}` with /u.
 const AGO_UNITS = [
-    { pattern: /^(с|сек|секунд\w*|s|sec|secs|second|seconds)$/i, seconds: 1 },
-    { pattern: /^(м|мин|минут\w*|m|min|mins|minute|minutes)$/i, seconds: 60 },
-    { pattern: /^(ч|час|часа|часов|h|hr|hrs|hour|hours)$/i, seconds: 3600 },
-    { pattern: /^(д|дн|дня|дней|день|d|day|days)$/i, seconds: 86_400 },
-    { pattern: /^(нед|недел\w*|w|wk|week|weeks)$/i, seconds: 604_800 },
+    { pattern: /^(с|сек|секунд\p{L}*|s|sec|secs|second|seconds)$/iu, seconds: 1 },
+    { pattern: /^(м|мин|минут\p{L}*|m|min|mins|minute|minutes)$/iu, seconds: 60 },
+    { pattern: /^(ч|час\p{L}*|h|hr|hrs|hour|hours)$/iu, seconds: 3600 },
+    { pattern: /^(д|дн|дня|дней|день|d|day|days)$/iu, seconds: 86_400 },
+    { pattern: /^(нед|недел\p{L}*|w|wk|week|weeks)$/iu, seconds: 604_800 },
 ];
 
 /**
