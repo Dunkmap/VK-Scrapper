@@ -435,9 +435,11 @@ export const createHtmlRouter = ({ collector, config }) => {
 
         if (needMore) {
             const nextOffset = offset + rawPosts.length;
+            // Stay on whichever host answered; a desktop fallback must not bounce back.
+            const { origin } = new URL(request.url);
             log.info(`[${target}] Stored ${totalStored} so far; requesting wall offset ${nextOffset}.`);
             await crawler.addRequests([{
-                url: `https://m.vk.com/wall${expectedOwnerId}?offset=${nextOffset}`,
+                url: `${origin}/wall${expectedOwnerId}?offset=${nextOffset}`,
                 label: HTML_LABELS.WALL,
                 uniqueKey: `html-wall:${expectedOwnerId}:${nextOffset}`,
                 userData: {

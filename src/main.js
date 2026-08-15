@@ -96,15 +96,36 @@ const runApiCrawl = async ({ config, targets, collector, runState, proxyConfigur
     await crawler.run(targets.map((target) => buildStartRequest(target, config)));
 };
 
+/** Network-level failures, as opposed to something wrong with the page itself. */
+const NAVIGATION_FAILURE = /timeout|ERR_|net::|socket|ECONN|EAI_AGAIN|tunnel|proxy/i;
+
+/** @param {Error} error */
+const isNavigationFailure = (error) => NAVIGATION_FAILURE.test(error?.message ?? '');
+
+/**
+ * Swaps between VK's mobile and desktop hosts. When one is unreachable through a
+ * given proxy the other frequently still answers, and both render walls this
+ * Actor can read.
+ * @param {string} url
+ */
+const swapVkHost = (url) => (url.includes('//m.vk.com')
+    ? url.replace('//m.vk.com', '//vk.com')
+    : url.replace('//vk.com', '//m.vk.com'));
+
 /** Runs the token-free mobile-HTML crawl. */
 const runHtmlCrawl = async ({ config, targets, collector, proxyConfiguration }) => {
     const crawler = new PlaywrightCrawler({
         proxyConfiguration,
         requestHandler: createHtmlRouter({ collector, config }),
         maxConcurrency: 2,
-        maxRequestRetries: 3,
-        navigationTimeoutSecs: 45,
+        // Residential proxies rotate through exits of wildly varying quality, and a
+        // dead exit costs a full navigation timeout, so budget for several bad draws.
+        maxRequestRetries: 8,
+        navigationTimeoutSecs: 30,
         requestHandlerTimeoutSecs: 300,
+        // Give up on a browser after a handful of pages so a poisoned session and
+        // its proxy exit cannot serve the whole run.
+        retireBrowserAfterPageCount: 5,
         preNavigationHooks: [
             async (_ctx, gotoOptions) => {
                 // VK holds sockets open for polling, so "load" never fires and every
@@ -124,8 +145,23 @@ const runHtmlCrawl = async ({ config, targets, collector, proxyConfiguration }) 
                 locale: 'ru-RU',
             },
         },
+        errorHandler: ({ request, session }, error) => {
+            // A navigation failure means the proxy exit is bad, not the page. Burn the
+            // session so the retry draws a different IP instead of the same dead one.
+            if (isNavigationFailure(error)) {
+                session?.retire();
+                const swapped = swapVkHost(request.url);
+                if (swapped !== request.url && request.retryCount >= 2) {
+                    log.warning(`Mobile VK is not responding; retrying "${request.userData.target}" on ${swapped}.`);
+                    request.url = swapped;
+                }
+            }
+        },
         failedRequestHandler: ({ request }, error) => {
-            log.error(`Wall for "${request.userData.target}" could not be scraped: ${error.message}`);
+            log.error(
+                `Wall for "${request.userData.target}" could not be scraped after ${request.retryCount} attempts: `
+                + `${error.message}`,
+            );
         },
     });
 

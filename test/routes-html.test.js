@@ -44,7 +44,10 @@ const rawPost = (ownerId, postId, overrides = {}) => ({
  * Drives the handler with a fake page. `extractPostsInPage` is identified by
  * function identity so the two `evaluate` shapes can be told apart.
  */
-const runHandler = async ({ posts, userData, config = baseConfig, collector, wasScoped = true }) => {
+const runHandler = async ({
+    posts, userData, config = baseConfig, collector, wasScoped = true,
+    url = 'https://m.vk.com/vkvideo',
+}) => {
     const router = createHtmlRouter({ collector, config });
     const enqueued = [];
 
@@ -58,7 +61,7 @@ const runHandler = async ({ posts, userData, config = baseConfig, collector, was
     await router(
         {
             page,
-            request: { label: HTML_LABELS.WALL, userData: { label: HTML_LABELS.WALL, ...userData } },
+            request: { url, label: HTML_LABELS.WALL, userData: { label: HTML_LABELS.WALL, ...userData } },
             crawler: { addRequests: async (reqs) => enqueued.push(...reqs) },
             log: {
                 debug: vi.fn(), info: vi.fn(), warning: vi.fn(), error: vi.fn(),
@@ -124,6 +127,18 @@ describe('HTML wall handler', () => {
         expect(enqueued).toHaveLength(1);
         expect(enqueued[0].url).toBe('https://m.vk.com/wall-1?offset=2');
         expect(enqueued[0].userData).toMatchObject({ offset: 2, storedSoFar: 2, pageIndex: 1 });
+    });
+
+    it('paginates on whichever host answered, so a desktop fallback sticks', async () => {
+        const collector = new ResultCollector({ maxItems: 100 });
+        const { enqueued } = await runHandler({
+            posts: [rawPost(-1, 1)],
+            userData: walkerUserData({ ownerId: -1 }),
+            url: 'https://vk.com/vkvideo',
+            collector,
+        });
+
+        expect(enqueued[0].url).toBe('https://vk.com/wall-1?offset=1');
     });
 
     it('carries the running total forward so later pages respect the budget', async () => {
