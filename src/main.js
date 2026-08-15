@@ -4,6 +4,7 @@ import { CheerioCrawler } from '@crawlee/cheerio';
 import { PlaywrightCrawler } from '@crawlee/playwright';
 import { Actor, log } from 'apify';
 
+import { buildApiCrawlerOptions, buildHtmlCrawlerOptions } from './crawler-options.js';
 import { validateInput } from './input.js';
 import { ResultCollector } from './results.js';
 import { createApiRouter, LABELS } from './routes.js';
@@ -68,104 +69,18 @@ const buildStartRequest = (target, config) => {
 const runApiCrawl = async ({ config, targets, collector, runState, proxyConfiguration }) => {
     const router = createApiRouter({ collector, config, runState });
 
-    const crawler = new CheerioCrawler({
-        proxyConfiguration,
-        requestHandler: router,
-        additionalMimeTypes: ['application/json'],
-        // VK caps user tokens at roughly 3 requests/second; one at a time keeps us clear.
-        maxConcurrency: 1,
-        maxRequestRetries: 5,
-        requestHandlerTimeoutSecs: 180,
-        errorHandler: ({ request }, error) => {
-            const { retry, fatal } = router.classifyError(error);
-            if (fatal) {
-                log.error(`Fatal VK API error - aborting run: ${error.message}`);
-                request.noRetry = true;
-                return;
-            }
-            if (!retry) {
-                log.softFail(`Skipping "${request.userData.target}": ${error.message}`);
-                request.noRetry = true;
-            }
-        },
-        failedRequestHandler: ({ request }, error) => {
-            log.error(`Request for target "${request.userData.target}" failed: ${error.message}`);
-        },
-    });
+    const crawler = new CheerioCrawler(buildApiCrawlerOptions({ router, proxyConfiguration }));
 
     await crawler.run(targets.map((target) => buildStartRequest(target, config)));
 };
 
-/** Network-level failures, as opposed to something wrong with the page itself. */
-const NAVIGATION_FAILURE = /timeout|ERR_|net::|socket|ECONN|EAI_AGAIN|tunnel|proxy/i;
-
-/** @param {Error} error */
-const isNavigationFailure = (error) => NAVIGATION_FAILURE.test(error?.message ?? '');
-
-/**
- * Swaps between VK's mobile and desktop hosts. When one is unreachable through a
- * given proxy the other frequently still answers, and both render walls this
- * Actor can read.
- * @param {string} url
- */
-const swapVkHost = (url) => (url.includes('//m.vk.com')
-    ? url.replace('//m.vk.com', '//vk.com')
-    : url.replace('//vk.com', '//m.vk.com'));
-
 /** Runs the token-free mobile-HTML crawl. */
 const runHtmlCrawl = async ({ config, targets, collector, proxyConfiguration }) => {
-    const crawler = new PlaywrightCrawler({
+    const crawler = new PlaywrightCrawler(buildHtmlCrawlerOptions({
+        router: createHtmlRouter({ collector, config }),
+        config,
         proxyConfiguration,
-        requestHandler: createHtmlRouter({ collector, config }),
-        maxConcurrency: 2,
-        // Residential proxies rotate through exits of wildly varying quality, and a
-        // dead exit costs a full navigation timeout, so budget for several bad draws.
-        maxRequestRetries: 8,
-        navigationTimeoutSecs: 30,
-        requestHandlerTimeoutSecs: 300,
-        browserPoolOptions: {
-            // Give up on a browser after a handful of pages so a poisoned session and
-            // its proxy exit cannot serve the whole run.
-            retireBrowserAfterPageCount: 5,
-        },
-        preNavigationHooks: [
-            async (_ctx, gotoOptions) => {
-                // VK holds sockets open for polling, so "load" never fires and every
-                // navigation burns the full timeout before succeeding anyway.
-                // Crawlee's hook contract is to mutate this object in place.
-                // eslint-disable-next-line no-param-reassign
-                gotoOptions.waitUntil = 'domcontentloaded';
-            },
-        ],
-        launchContext: {
-            launchOptions: {
-                args: ['--disable-gpu', '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-                // VK prints post times in the viewer's timezone. Residential proxies
-                // exit in a different country each run, so without pinning these the
-                // same wall yields differently-shifted timestamps every time.
-                timezoneId: config.htmlTimezone,
-                locale: 'ru-RU',
-            },
-        },
-        errorHandler: ({ request, session }, error) => {
-            // A navigation failure means the proxy exit is bad, not the page. Burn the
-            // session so the retry draws a different IP instead of the same dead one.
-            if (isNavigationFailure(error)) {
-                session?.retire();
-                const swapped = swapVkHost(request.url);
-                if (swapped !== request.url && request.retryCount >= 2) {
-                    log.warning(`Mobile VK is not responding; retrying "${request.userData.target}" on ${swapped}.`);
-                    request.url = swapped;
-                }
-            }
-        },
-        failedRequestHandler: ({ request }, error) => {
-            log.error(
-                `Wall for "${request.userData.target}" could not be scraped after ${request.retryCount} attempts: `
-                + `${error.message}`,
-            );
-        },
-    });
+    }));
 
     const startRequests = targets
         .filter((target) => {
