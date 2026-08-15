@@ -178,9 +178,6 @@ export const extractPostsInPage = ({ postSelector, wallRootSelector }) => {
     return { posts: [...byId.values()], wasScoped };
 };
 
-    return results;
-};
-
 /**
  * @param {object} context
  * @param {import('./results.js').ResultCollector} context.collector
@@ -191,7 +188,7 @@ export const createHtmlRouter = ({ collector, config }) => {
     const router = createPlaywrightRouter();
 
     router.addHandler(HTML_LABELS.WALL, async ({ page, request }) => {
-        const { target, targetType } = request.userData;
+        const { target, targetType, ownerId } = request.userData;
 
         const perTargetLimit = config.postsPerTarget ?? Number.POSITIVE_INFINITY;
         const wanted = Math.min(perTargetLimit, collector.remaining);
@@ -230,9 +227,37 @@ export const createHtmlRouter = ({ collector, config }) => {
             await page.waitForTimeout(2_000);
         }
 
-        const rawPosts = await page.evaluate(extractPostsInPage);
-        if (rawPosts.length === 0) {
+        const { posts: extracted, wasScoped } = await page.evaluate(extractPostsInPage, {
+            postSelector: POST_SELECTOR,
+            wallRootSelector: WALL_ROOT_SELECTOR,
+        });
+        if (extracted.length === 0) {
             throw new Error(`Wall for "${target}" rendered but no posts could be parsed - VK markup may have changed.`);
+        }
+        if (!wasScoped) {
+            log.warning(
+                `[${target}] Could not find the wall container, so the whole page was searched. `
+                + 'Posts from recommendation blocks are filtered out by owner, but coverage may be uneven.',
+            );
+        }
+
+        // Every post on a wall carries that wall's owner ID. Anything else came from
+        // a recommendation rail and does not belong in the results for this target.
+        const expectedOwnerId = ownerId ?? mostCommon(extracted.map((post) => post.ownerId));
+        const rawPosts = extracted.filter((post) => post.ownerId === expectedOwnerId);
+        const foreignCount = extracted.length - rawPosts.length;
+
+        if (foreignCount > 0) {
+            log.info(
+                `[${target}] Ignored ${foreignCount} post(s) belonging to other communities `
+                + `(kept owner ${expectedOwnerId}).`,
+            );
+        }
+        if (rawPosts.length === 0) {
+            throw new Error(
+                `Every post found for "${target}" belonged to a different community. `
+                + 'VK likely served a recommendation page instead of the wall.',
+            );
         }
 
         const scrapedAt = new Date().toISOString();
