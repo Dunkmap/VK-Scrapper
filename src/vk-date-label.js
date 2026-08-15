@@ -24,15 +24,32 @@ const YESTERDAY = /^(вчера|yesterday)(?![\p{L}])/iu;
 const HAS_CLOCK = /\d{1,2}:\d{2}/;
 
 /**
- * Pulls "в 10:30" / "at 10:30" / bare "10:30" out of a label.
+ * Pulls "в 10:30" / "at 10:30" / "3:03 PM" / bare "10:30" out of a label.
+ *
+ * The English VK interface uses a 12-hour clock, so the meridiem is not optional
+ * detail: dropping it puts every afternoon post twelve hours early.
+ *
  * @returns {{hours: number, minutes: number}|null}
  */
 const matchTime = (label) => {
-    const match = /(?:^|\s)(?:в|at)?\s*(\d{1,2}):(\d{2})/i.exec(label);
+    const match = /(?:^|\s)(?:в|at)?\s*(\d{1,2}):(\d{2})\s*(am|pm|a\.m\.|p\.m\.)?/i.exec(label);
     if (!match) return null;
-    const hours = Number(match[1]);
+
+    let hours = Number(match[1]);
     const minutes = Number(match[2]);
-    if (hours > 23 || minutes > 59) return null;
+    const meridiem = match[3]?.replace(/\./g, '').toLowerCase();
+
+    if (minutes > 59) return null;
+
+    if (meridiem) {
+        // A 12-hour clock only ever reads 1-12; anything else is a misparse.
+        if (hours < 1 || hours > 12) return null;
+        if (meridiem === 'pm' && hours !== 12) hours += 12;
+        if (meridiem === 'am' && hours === 12) hours = 0;
+    } else if (hours > 23) {
+        return null;
+    }
+
     return { hours, minutes };
 };
 
@@ -94,6 +111,9 @@ export const isValidTimeZone = (timeZone) => {
         return false;
     }
 };
+
+/** Drops seconds and milliseconds; VK never states an age that precisely. */
+const toMinute = (date) => new Date(Math.floor(date.getTime() / 60_000) * 60_000);
 
 /** "только что" / "just now" - within a minute of now. */
 const JUST_NOW = /^(только\s+что|just\s+now|now)$/i;
@@ -165,11 +185,13 @@ export const parseVkDateLabel = (label, { now = new Date(), timeZone = 'UTC' } =
     const text = label.trim().toLowerCase();
     if (!text) return null;
 
-    if (JUST_NOW.test(text)) return { iso: now.toISOString(), isExact: false };
+    // An age is only ever accurate to the unit VK printed, so seconds and
+    // milliseconds carried over from `now` would be invented precision.
+    if (JUST_NOW.test(text)) return { iso: toMinute(now).toISOString(), isExact: false };
 
     // "5 минут назад" / "2 ч назад" / "3 days ago" - an age, not a clock reading.
     const relative = matchRelativeAge(text, now);
-    if (relative) return { iso: relative.toISOString(), isExact: false };
+    if (relative) return { iso: toMinute(relative).toISOString(), isExact: false };
 
     const time = matchTime(text);
 
