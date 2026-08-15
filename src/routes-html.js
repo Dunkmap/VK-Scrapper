@@ -34,6 +34,12 @@ const SETTLE_TIMEOUT_MS = 3_000;
 /** VK's "show more posts" control, across markup generations. */
 const SHOW_MORE_SELECTOR = '.show_more_wrap a, ._wall_more_link, .wall_more_link, .ui_show_more';
 
+/**
+ * How many offset pages to follow per target. VK's mobile wall paginates by URL
+ * (`/wall-123?offset=40`), which reaches much further than scrolling one page.
+ */
+const MAX_WALL_PAGES = 25;
+
 /** Every markup generation VK has served a wall post in. */
 export const POST_SELECTOR = '[data-post-id], .wall_item, ._post, .post';
 
@@ -221,11 +227,14 @@ const mostCommon = (values) => {
 export const createHtmlRouter = ({ collector, config }) => {
     const router = createPlaywrightRouter();
 
-    router.addHandler(HTML_LABELS.WALL, async ({ page, request }) => {
-        const { target, targetType, ownerId } = request.userData;
+    router.addHandler(HTML_LABELS.WALL, async ({ page, request, crawler }) => {
+        const {
+            target, targetType, ownerId, offset = 0, storedSoFar = 0, pageIndex = 0,
+        } = request.userData;
 
         const perTargetLimit = config.postsPerTarget ?? Number.POSITIVE_INFINITY;
-        const wanted = Math.min(perTargetLimit, collector.remaining);
+        // This page only needs to cover what earlier offsets did not.
+        const wanted = Math.min(perTargetLimit - storedSoFar, collector.remaining);
 
         await page.waitForSelector(POST_SELECTOR, { timeout: 20_000 })
             .catch(() => {
@@ -235,8 +244,14 @@ export const createHtmlRouter = ({ collector, config }) => {
                 );
             });
 
+        // Count only posts inside the wall. Counting the whole document includes
+        // recommendation rails, which made the loop believe it already had enough
+        // and stop scrolling before the wall itself had loaded.
         const countPosts = () => page
-            .evaluate((selector) => document.querySelectorAll(selector).length, POST_SELECTOR)
+            .evaluate(({ postSelector, wallRootSelector }) => {
+                const root = document.querySelector(wallRootSelector);
+                return (root ?? document).querySelectorAll(postSelector).length;
+            }, { postSelector: POST_SELECTOR, wallRootSelector: WALL_ROOT_SELECTOR })
             .catch(() => 0);
 
         // Scroll until VK stops adding posts, we have enough, or the budget runs out.
@@ -409,20 +424,47 @@ export const createHtmlRouter = ({ collector, config }) => {
         }
 
         const stored = await collector.push(items);
+        const totalStored = storedSoFar + stored;
 
-        // Under-delivery is the usual symptom of a login wall or changed markup;
-        // say so plainly instead of leaving the user to compare numbers themselves.
-        if (stored < wanted && Number.isFinite(wanted)) {
+        // VK's mobile wall paginates by URL offset, which reaches far deeper than
+        // scrolling one rendered page. Follow it while posts keep arriving.
+        const needMore = totalStored < Math.min(perTargetLimit, config.maxItems)
+            && !collector.isFull
+            && stored > 0
+            && pageIndex < MAX_WALL_PAGES;
+
+        if (needMore) {
+            const nextOffset = offset + rawPosts.length;
+            log.info(`[${target}] Stored ${totalStored} so far; requesting wall offset ${nextOffset}.`);
+            await crawler.addRequests([{
+                url: `https://m.vk.com/wall${expectedOwnerId}?offset=${nextOffset}`,
+                label: HTML_LABELS.WALL,
+                uniqueKey: `html-wall:${expectedOwnerId}:${nextOffset}`,
+                userData: {
+                    label: HTML_LABELS.WALL,
+                    target,
+                    targetType,
+                    ownerId: expectedOwnerId,
+                    offset: nextOffset,
+                    storedSoFar: totalStored,
+                    pageIndex: pageIndex + 1,
+                },
+            }]);
+            return;
+        }
+
+        // Only report a shortfall once the crawl for this target is actually over.
+        if (totalStored < wanted && Number.isFinite(wanted)) {
             // Distinguish "VK would not serve more" from "we parsed fewer than we saw",
             // because only the second one is something this Actor can fix.
             const sawEnough = rawPosts.length >= wanted;
             log.warning(
                 sawEnough
-                    ? `[${target}] Found ${rawPosts.length} post(s) but stored only ${stored} - the rest were `
+                    ? `[${target}] Found ${rawPosts.length} post(s) but stored only ${totalStored} - the rest were `
                         + 'filtered out by your date range or could not be parsed.'
-                    : `[${target}] VK served only ${seenCount} post(s) for this wall and stopped there. This is `
-                        + 'VK\'s anonymous access limit, not a scraping error: the public HTML simply does not '
-                        + 'contain more. An "accessToken" lifts this - the API returns the entire wall.',
+                    : `[${target}] VK stopped serving posts after ${totalStored}. Anonymous access to a wall is `
+                        + 'capped, so the public HTML does not contain more. An "accessToken" lifts this - the '
+                        + 'API returns the entire wall.',
             );
         }
     });
