@@ -25,11 +25,19 @@ const BARREN_ROUNDS_BEFORE_STOP = 3;
 const POST_SELECTOR = '[data-post-id], .wall_item, ._post, .post';
 
 /**
+ * The wall itself. VK surrounds it with recommendation rails and "interesting
+ * pages" blocks that use the same post markup but belong to other communities,
+ * so the search has to be scoped to this subtree.
+ */
+const WALL_ROOT_SELECTOR = '#wall_posts, .wall_posts, ._wall_posts, #page_wall_posts,'
+    + ' #wl_posts, .wall_module, [id^="page_wall_posts"]';
+
+/**
  * Runs in the browser: reads every wall post currently in the DOM.
  * Kept dependency-free because it is serialized into the page context.
  * Exported so it can be exercised against fixture markup in tests.
  */
-export const extractPostsInPage = () => {
+export const extractPostsInPage = ({ postSelector, wallRootSelector }) => {
     /** Buttons and badges VK renders *inside* the text node, e.g. "Show more". */
     const TEXT_CHROME = '.wall_post_more, .PostTextMore, .js-wall_post_more, .wall_post_text_more,'
         + ' .PostText__more, .show_more, .more_link';
@@ -60,7 +68,12 @@ export const extractPostsInPage = () => {
         return null;
     };
 
-    const containers = document.querySelectorAll('[data-post-id], .wall_item, ._post, .post');
+    // Prefer the wall subtree; fall back to the whole document only if VK's
+    // markup has moved and scoping would otherwise find nothing.
+    const wallRoot = document.querySelector(wallRootSelector);
+    const scoped = wallRoot ? wallRoot.querySelectorAll(postSelector) : [];
+    const containers = scoped.length > 0 ? scoped : document.querySelectorAll(postSelector);
+    const wasScoped = scoped.length > 0;
 
     // VK renders the same post more than once - a pinned post repeats further down
     // the wall, and some layouts nest a wrapper around the post body. Keyed by ID so
@@ -162,7 +175,8 @@ export const extractPostsInPage = () => {
         if (!existing || richness(post) > richness(existing)) byId.set(key, post);
     }
 
-    const results = [...byId.values()];
+    return { posts: [...byId.values()], wasScoped };
+};
 
     return results;
 };
