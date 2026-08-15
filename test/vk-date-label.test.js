@@ -47,7 +47,8 @@ describe('parseVkDateLabel', () => {
         ['2 ч назад', '2024-08-12T13:00:00.000Z'],
         ['3 дня назад', '2024-08-09T15:00:00.000Z'],
         ['3 days ago', '2024-08-09T15:00:00.000Z'],
-        ['30 sec ago', '2024-08-12T14:59:30.000Z'],
+        // Floored to the minute - VK's age is not accurate to the second.
+        ['30 sec ago', '2024-08-12T14:59:00.000Z'],
         ['1 week ago', '2024-08-05T15:00:00.000Z'],
     ])('resolves the relative age %s', (label, expected) => {
         expect(parseVkDateLabel(label, { now: NOW }).iso).toBe(expected);
