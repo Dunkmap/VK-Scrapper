@@ -179,6 +179,27 @@ export const extractPostsInPage = ({ postSelector, wallRootSelector }) => {
 };
 
 /**
+ * The value appearing most often, used to infer a wall's owner when the target
+ * was given as a handle rather than a numeric ID.
+ * @param {number[]} values
+ * @returns {number|null}
+ */
+const mostCommon = (values) => {
+    const tally = new Map();
+    for (const value of values) tally.set(value, (tally.get(value) ?? 0) + 1);
+
+    let winner = null;
+    let best = 0;
+    for (const [value, count] of tally) {
+        if (count > best) {
+            winner = value;
+            best = count;
+        }
+    }
+    return winner;
+};
+
+/**
  * @param {object} context
  * @param {import('./results.js').ResultCollector} context.collector
  * @param {object} context.config
