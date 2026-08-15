@@ -19,7 +19,20 @@ export const HTML_LABELS = { WALL: 'HTML_WALL' };
 const MAX_SCROLL_ROUNDS = 40;
 
 /** Consecutive rounds that add no posts before we call the wall finished. */
-const BARREN_ROUNDS_BEFORE_STOP = 3;
+const BARREN_ROUNDS_BEFORE_STOP = 2;
+
+/**
+ * Total time allowed for scrolling one wall. Anonymous VK stops serving posts
+ * after a handful, so without a ceiling the loop spends minutes confirming a
+ * limit it hit in the first few seconds.
+ */
+const SCROLL_BUDGET_MS = 45_000;
+
+/** How long to wait for a scroll to produce new posts before treating it as barren. */
+const SETTLE_TIMEOUT_MS = 3_000;
+
+/** VK's "show more posts" control, across markup generations. */
+const SHOW_MORE_SELECTOR = '.show_more_wrap a, ._wall_more_link, .wall_more_link, .ui_show_more';
 
 /** Every markup generation VK has served a wall post in. */
 export const POST_SELECTOR = '[data-post-id], .wall_item, ._post, .post';
@@ -222,30 +235,47 @@ export const createHtmlRouter = ({ collector, config }) => {
                 );
             });
 
-        // Scroll until VK stops adding posts or we have enough. VK loads lazily and
-        // often pauses for a beat, so one barren round is not the end of the wall -
-        // only several in a row are.
-        let seenCount = 0;
-        let barrenRounds = 0;
-        for (let round = 0; round < MAX_SCROLL_ROUNDS; round++) {
-            const count = await page
-                .evaluate((selector) => document.querySelectorAll(selector).length, POST_SELECTOR)
-                .catch(() => 0);
-            if (count >= wanted) break;
+        const countPosts = () => page
+            .evaluate((selector) => document.querySelectorAll(selector).length, POST_SELECTOR)
+            .catch(() => 0);
 
+        // Scroll until VK stops adding posts, we have enough, or the budget runs out.
+        // Each round waits for the count to actually change rather than sleeping a
+        // fixed interval, so a wall that is done is detected in seconds, not minutes.
+        const deadline = Date.now() + SCROLL_BUDGET_MS;
+        let seenCount = await countPosts();
+        let barrenRounds = 0;
+
+        for (let round = 0; round < MAX_SCROLL_ROUNDS && seenCount < wanted; round++) {
+            if (Date.now() > deadline) {
+                log.info(`[${target}] Scroll budget spent after ${seenCount} post(s); collecting what loaded.`);
+                break;
+            }
+
+            await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+
+            // Only click "show more" if it is actually there - a locator timeout on a
+            // button that does not exist costs seconds on every single round.
+            const moreButton = await page.$(SHOW_MORE_SELECTOR);
+            if (moreButton) await moreButton.click({ timeout: 2_000 }).catch(() => {});
+
+            // Resolves the moment new posts appear; falls through quickly if none do.
+            await page
+                .waitForFunction(
+                    ([selector, previous]) => document.querySelectorAll(selector).length > previous,
+                    [POST_SELECTOR, seenCount],
+                    { timeout: SETTLE_TIMEOUT_MS, polling: 250 },
+                )
+                .catch(() => {});
+
+            const count = await countPosts();
             barrenRounds = count === seenCount ? barrenRounds + 1 : 0;
+            seenCount = count;
+
             if (barrenRounds >= BARREN_ROUNDS_BEFORE_STOP) {
                 log.info(`[${target}] VK stopped loading posts after ${count} - treating that as the end of the wall.`);
                 break;
             }
-            seenCount = count;
-
-            await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-            await page.locator('.show_more_wrap a, ._wall_more_link, .wall_more_link, .ui_show_more')
-                .first()
-                .click({ timeout: 2_000 })
-                .catch(() => {});
-            await page.waitForTimeout(2_000);
         }
 
         const { posts: extracted, wasScoped } = await page.evaluate(extractPostsInPage, {
@@ -383,9 +413,16 @@ export const createHtmlRouter = ({ collector, config }) => {
         // Under-delivery is the usual symptom of a login wall or changed markup;
         // say so plainly instead of leaving the user to compare numbers themselves.
         if (stored < wanted && Number.isFinite(wanted)) {
+            // Distinguish "VK would not serve more" from "we parsed fewer than we saw",
+            // because only the second one is something this Actor can fix.
+            const sawEnough = rawPosts.length >= wanted;
             log.warning(
-                `[${target}] Returned ${stored} post(s) but ${wanted} were requested. VK's public HTML limits how `
-                + 'much of a wall is reachable without authentication - supply an "accessToken" for the full wall.',
+                sawEnough
+                    ? `[${target}] Found ${rawPosts.length} post(s) but stored only ${stored} - the rest were `
+                        + 'filtered out by your date range or could not be parsed.'
+                    : `[${target}] VK served only ${seenCount} post(s) for this wall and stopped there. This is `
+                        + 'VK\'s anonymous access limit, not a scraping error: the public HTML simply does not '
+                        + 'contain more. An "accessToken" lifts this - the API returns the entire wall.',
             );
         }
     });
