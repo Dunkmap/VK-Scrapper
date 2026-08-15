@@ -123,9 +123,11 @@ const runHtmlCrawl = async ({ config, targets, collector, proxyConfiguration }) 
         maxRequestRetries: 8,
         navigationTimeoutSecs: 30,
         requestHandlerTimeoutSecs: 300,
-        // Give up on a browser after a handful of pages so a poisoned session and
-        // its proxy exit cannot serve the whole run.
-        retireBrowserAfterPageCount: 5,
+        browserPoolOptions: {
+            // Give up on a browser after a handful of pages so a poisoned session and
+            // its proxy exit cannot serve the whole run.
+            retireBrowserAfterPageCount: 5,
+        },
         preNavigationHooks: [
             async (_ctx, gotoOptions) => {
                 // VK holds sockets open for polling, so "load" never fires and every
