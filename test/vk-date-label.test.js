@@ -67,6 +67,48 @@ describe('parseVkDateLabel', () => {
         expect(parseVkDateLabel(label, { now: NOW }).iso).toBe(expected);
     });
 
+    // Regression: the English VK interface uses a 12-hour clock. Ignoring the
+    // meridiem put every afternoon post exactly twelve hours early.
+    describe('12-hour clock', () => {
+        it.each([
+            ['12 aug 2024 at 3:03 pm', '2024-08-12T15:03:00.000Z'],
+            ['12 aug 2024 at 3:03 am', '2024-08-12T03:03:00.000Z'],
+            ['12 aug 2024 at 12:30 am', '2024-08-12T00:30:00.000Z'],
+            ['12 aug 2024 at 12:30 pm', '2024-08-12T12:30:00.000Z'],
+            ['12 aug 2024 at 11:59 PM', '2024-08-12T23:59:00.000Z'],
+            ['12 aug 2024 at 1:05 p.m.', '2024-08-12T13:05:00.000Z'],
+        ])('reads %s correctly', (label, expected) => {
+            expect(parseVkDateLabel(label, { now: NOW }).iso).toBe(expected);
+        });
+
+        it('applies the meridiem to relative day labels too', () => {
+            expect(parseVkDateLabel('today at 3:03 pm', { now: NOW }).iso).toBe('2024-08-12T15:03:00.000Z');
+            expect(parseVkDateLabel('yesterday at 9:12 pm', { now: NOW }).iso).toBe('2024-08-11T21:12:00.000Z');
+        });
+
+        it('still reads a 24-hour clock when no meridiem is present', () => {
+            expect(parseVkDateLabel('12 авг 2024 в 15:03', { now: NOW }).iso).toBe('2024-08-12T15:03:00.000Z');
+            expect(parseVkDateLabel('12 авг 2024 в 00:30', { now: NOW }).iso).toBe('2024-08-12T00:30:00.000Z');
+        });
+
+        it('rejects an hour that cannot exist on a 12-hour clock', () => {
+            expect(parseVkDateLabel('12 aug 2024 at 15:03 pm', { now: NOW })).toBeNull();
+            expect(parseVkDateLabel('12 aug 2024 at 0:30 am', { now: NOW })).toBeNull();
+        });
+
+        it('converts the meridiem before applying the timezone, not after', () => {
+            // 3:03 PM Moscow is 12:03 UTC - the exact case seen in production.
+            expect(parseVkDateLabel('12 aug 2024 at 3:03 pm', { now: NOW, timeZone: 'Europe/Moscow' }).iso)
+                .toBe('2024-08-12T12:03:00.000Z');
+        });
+    });
+
+    it('reports relative ages to the minute, not the millisecond', () => {
+        const odd = new Date('2024-08-12T15:00:51.310Z');
+        expect(parseVkDateLabel('four hours ago', { now: odd }).iso).toBe('2024-08-12T11:00:00.000Z');
+        expect(parseVkDateLabel('только что', { now: odd }).iso).toBe('2024-08-12T15:00:00.000Z');
+    });
+
     it('does not mistake months for minutes', () => {
         // A loose /^m/ unit pattern once read "months" as "minutes".
         expect(parseVkDateLabel('3 months ago', { now: NOW })).toBeNull();
