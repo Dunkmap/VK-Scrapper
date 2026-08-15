@@ -3,8 +3,8 @@
     "actorSpecification": 1,
     "name": "vk-posts-scraper",
     "title": "VK Posts Scraper",
-    "description": "Extracts full VK wall posts - text, author, stats, attachment URLs, repost chains and comments - from public profiles and communities.",
-    "version": "0.1",
+    "description": "Scrape wall posts from public VK (VKontakte) profiles and communities: text, timestamps, attachment URLs, repost chains, engagement counts and comments.",
+    "version": "1.0",
     "meta": {
         "templateId": "js-crawlee-playwright-chrome"
     },
@@ -13,5 +13,6 @@
     "storages": {
         "dataset": "./dataset_schema.json"
     },
-    "dockerfile": "../Dockerfile"
+    "dockerfile": "../Dockerfile",
+    "readme": "../README.md"
 }

@@ -1,97 +1,170 @@
-# VK Posts Scraper
+## What does VK Posts Scraper do?
 
-Extracts wall posts from public VK profiles and communities, with every field VK exposes for a post: text, author, engagement stats, attachment URLs, repost chains, geotags, poll results and — optionally — full comment threads.
+**VK Posts Scraper extracts wall posts from public [VK (VKontakte)](https://vk.com) profiles and communities** — post text, publication timestamps, attachment URLs with their VK object IDs, repost chains, and engagement counts. Give it a handle like `durov`, a community URL, an owner ID, or a direct post link, and it walks the wall and returns structured JSON.
+
+It runs on the Apify platform, so you get scheduling, a REST API, webhook and integration support, automatic proxy rotation, and run monitoring without maintaining any infrastructure yourself.
+
+The scraper has **two modes**. Without a VK access token it scrapes VK's public HTML, which returns text, dates, and media links. With a token it uses the official VK API and returns everything — engagement counts, author profiles, comment threads, polls, and geotags. See [Extraction modes](#extraction-modes) for exactly which fields each mode fills.
+
+## Why use VK Posts Scraper?
+
+- **Competitor and brand monitoring** — track what communities in your market publish, and how often.
+- **Content research** — pull a community's back catalogue to analyse topics, formats, and posting cadence.
+- **Media and archival work** — capture posts with their attachment URLs before they change or disappear.
+- **Dataset building** — collect Russian-language social text for analysis, with exact timestamps.
+- **Feeding other tools** — schedule runs and push results to Google Sheets, S3, a webhook, or your own API.
+
+## How to use VK Posts Scraper
+
+1. Click **Try for free** (or **Start** if you already have it).
+2. In the **Input** tab, add one or more targets to **VK targets** — for example `kinopoisk`, `https://vk.com/durov`, or `-220754053`.
+3. *(Recommended)* Paste a **VK access token**. This unlocks engagement counts, authors, and comments. See [Getting an access token](#getting-an-access-token).
+4. Set **Maximum posts** to control how much you collect.
+5. Click **Start** and wait — most runs finish in under a minute.
+6. Open the **Output** tab, or download the dataset as JSON, CSV, Excel, or HTML.
 
 ## Input
 
+Configure everything from the **Input** tab. Only `vkTargets` is required.
+
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `vkTargets` | string[] | **required** | Handles (`durov`), profile/community URLs (`https://vk.com/kinopoisk`), signed owner IDs (`-40316705`), or direct post links (`https://vk.com/wall1_45678`). |
-| `accessToken` | string (secret) | — | VK API token with the `wall` scope. Strongly recommended — see [Extraction modes](#extraction-modes). |
-| `maxItems` | integer | `500` | Hard cap on posts stored across all targets. |
+| `vkTargets` | array | **required** | Handles (`durov`), profile/community URLs, signed owner IDs (`-220754053`), or post links (`https://vk.com/wall1_45678`). |
+| `accessToken` | string (secret) | — | VK API token with the `wall` scope. Strongly recommended. |
+| `maxItems` | integer | 500 | Total posts across all targets. |
 | `postsPerTarget` | integer | — | Optional per-target cap. |
-| `publishedAfter` | string | — | `YYYY-MM-DD` or ISO-8601. Pagination stops once older posts are reached. |
+| `publishedAfter` | string | — | `YYYY-MM-DD` or ISO-8601. Pagination stops at older posts. |
 | `publishedBefore` | string | — | `YYYY-MM-DD` or ISO-8601. A bare date includes the whole day. |
-| `postFilter` | `all` \| `owner` \| `others` | `all` | Which posts to read from the wall (API mode only). |
-| `includeComments` | boolean | `false` | Fetch comment threads, including replies. API mode only. |
-| `maxComments` | integer | `100` | Comments fetched per post. |
-| `includeRawPost` | boolean | `false` | Attach the unmodified VK payload as `rawPost`. |
-| `proxyConfiguration` | object | Residential | VK blocks most datacenter IP ranges. |
+| `postFilter` | enum | `all` | `all`, `owner`, or `others`. API mode only. |
+| `includeComments` | boolean | false | Fetch comment threads with replies. API mode only. |
+| `maxComments` | integer | 100 | Comments per post when the above is on. |
+| `keepUndatedPosts` | boolean | false | Keep posts whose date could not be read, even when a date filter is set. |
+| `htmlTimezone` | string | `Europe/Moscow` | Timezone VK renders times in. HTML mode only. |
+| `includeRawPost` | boolean | false | Attach the unmodified VK API object as `rawPost`. |
+| `proxyConfiguration` | object | Residential | VK blocks most datacenter IPs. |
 
 ```json
 {
-    "vkTargets": ["kinopoisk", "https://vk.com/durov"],
+    "vkTargets": ["https://vk.com/vkvideo", "kinopoisk"],
     "accessToken": "vk1.a.…",
     "maxItems": 200,
-    "publishedAfter": "2024-01-01",
+    "publishedAfter": "2026-01-01",
     "includeComments": true
 }
 ```
 
-## Extraction modes
-
-**API mode** (an `accessToken` is supplied) calls the official VK API — `wall.get`, `wall.getById`, `wall.getComments`. This is the mode the Actor is built around and the only one that returns complete data. Get a token by creating a [standalone VK application](https://dev.vk.com/) and issuing a user token with the `wall` scope.
-
-**HTML mode** (no token) scrapes `m.vk.com` in a browser. It is a genuine fallback, not a substitute: VK's public HTML has no attachment URLs beyond thumbnails, often no view counts, and dates that frequently cannot be resolved to an exact timestamp (those posts get `postedAt: null` and a raw `postedAtLabel` instead). Closed walls and single-post targets are not reachable at all.
-
-Neither mode ever fabricates a value. A field VK does not return is `null`, and a failed extraction fails the run rather than producing placeholder data.
-
 ## Output
 
-One dataset item per post:
+One dataset item per post. You can download the dataset in various formats such as JSON, HTML, CSV, or Excel, or pull it through the Apify API.
 
 ```json
 {
-    "postId": "-22822305_1070789",
-    "ownerId": -22822305,
-    "authorId": -22822305,
-    "author": {
-        "id": -22822305,
-        "type": "group",
-        "name": "Кинопоиск",
-        "screenName": "kinopoisk",
-        "url": "https://vk.com/kinopoisk",
-        "photo": "https://sun.userapi.com/…",
-        "isVerified": true,
-        "membersCount": 2100000
-    },
-    "text": "Post body…",
-    "postedAt": "2024-06-01T09:30:00.000Z",
-    "editedAt": null,
-    "sourceUrl": "https://vk.com/wall-22822305_1070789",
+    "postId": "-220754053_278663",
+    "ownerId": -220754053,
+    "text": "Попали под чары Лены Журавлёвой и даже не сопротивляемся…",
+    "postedAt": "2026-08-13T12:03:00.000Z",
+    "sourceUrl": "https://vk.com/wall-220754053_278663",
     "stats": { "likes": 1240, "comments": 87, "reposts": 33, "views": 98000, "engagement": 1360 },
-    "mediaTypes": ["photo", "video"],
-    "mediaCount": 2,
+    "mediaTypes": ["photo"],
+    "mediaCount": 6,
     "attachments": [
-        { "type": "photo", "id": "-22822305_457301", "url": "https://sun.userapi.com/…jpg", "width": 2560, "height": 1440, "sizes": [] },
-        { "type": "video", "id": "-22822305_456789", "url": "https://vk.com/video-22822305_456789", "title": "Trailer", "durationSeconds": 132, "viewsCount": 45000 }
+        { "type": "photo", "id": "-220754053_457265754", "url": "https://vk.com/photo-220754053_457265754" }
     ],
     "isRepost": false,
     "repostChain": [],
-    "isPinned": false,
-    "isAd": false,
-    "geo": null,
-    "postSource": { "type": "vk", "platform": null },
-    "target": "kinopoisk",
-    "targetType": "handle",
-    "scrapedAt": "2024-06-02T11:00:00.000Z"
+    "target": "https://vk.com/vkvideo",
+    "targetType": "url",
+    "scrapedAt": "2026-08-15T19:06:24.168Z"
 }
 ```
 
-Attachment objects carry type-specific fields — `poll` has `question`/`answers`/`votesCount`, `link` has `url`/`title`/`description`, `doc` has `extension`/`sizeBytes`, and so on. Unmapped attachment types still appear with their `type`, `id` and `isKnownType: false`, so nothing is silently dropped. With `includeComments`, each post also gets a `comments` array whose entries carry the commenter, text, likes and nested `replies`.
+### Data fields
 
-## Limits and behaviour
+| Field | Description |
+| --- | --- |
+| `postId` | VK identifier as `ownerId_postId`. |
+| `ownerId` | Signed ID of the wall (negative for communities). |
+| `author`, `authorId` | Who wrote the post. Differs from the wall owner on community posts. |
+| `text` | Post body. |
+| `postedAt`, `editedAt` | ISO-8601 timestamps in UTC. |
+| `sourceUrl` | Canonical vk.com link. |
+| `stats` | `likes`, `comments`, `reposts`, `views`, `engagement`. |
+| `mediaTypes`, `mediaCount` | Attachment types and how many. |
+| `attachments` | Photos, videos, audio, docs, links and polls with VK object IDs and URLs. |
+| `isRepost`, `repostChain` | Whether the post reposts other content, and the originals. |
+| `comments` | Comment threads with replies, when enabled. |
+| `geo`, `isPinned`, `isAd`, `signer` | Post metadata. |
+| `target`, `targetType` | Which input produced this row. |
+| `scrapedAt` | When it was extracted. |
 
-- **Rate limits.** VK allows roughly 3 requests/second per user token; the Actor runs API requests one at a time and retries error code 6 with backoff.
-- **Budgets.** `maxItems` counts posts, not requests, and is enforced globally across targets. Posts are de-duplicated by `ownerId_postId`.
-- **Failure.** A run that stores zero posts fails with a diagnostic message instead of finishing "successfully" with an empty dataset. An invalid or expired token fails the run immediately.
-- **Scope.** Only public walls, or walls the supplied token can read. This Actor does not attempt to access private profiles or bypass VK's access controls.
+## Extraction modes
 
-## Development
+Field availability differs by mode. This table is the honest version — check it before you rely on a field.
 
-```bash
-npm install
-npm test     # unit + handler tests, no network access
-npm run lint
-apify run    # requires an INPUT in storage/key_value_stores/default/
-```
+| Field | HTML mode (no token) | API mode (with token) |
+| --- | --- | --- |
+| `text`, `postedAt`, `sourceUrl` | ✅ | ✅ |
+| `attachments` with URLs and IDs | ✅ | ✅ (plus sizes, durations, titles) |
+| `mediaTypes`, `isRepost`, `isPinned` | ✅ | ✅ |
+| `stats` (likes, views, comments) | ⚠️ often `null` | ✅ |
+| `author`, `wallOwner` | ❌ `null` | ✅ |
+| `repostChain` contents | ❌ empty | ✅ |
+| `comments` | ❌ | ✅ |
+| Polls, geotags, `signer`, `isAd` | ❌ | ✅ |
+| Whole wall depth | ⚠️ limited by VK | ✅ |
+| Private walls your token can read | ❌ | ✅ |
+
+**HTML mode is a convenience tier.** It is genuinely useful for text and media, but VK does not put engagement numbers in reliably-parseable public markup, so `stats` is frequently `null`. If you need engagement data, use a token.
+
+Nothing is ever invented. A field VK does not provide is `null`, never a guess.
+
+### Getting an access token
+
+1. Create a standalone application at [dev.vk.com](https://dev.vk.com).
+2. Open its settings and copy the **service access key**.
+3. Paste it into the **VK access token** field. It is stored encrypted and never appears in logs.
+
+This takes about two minutes and needs no OAuth flow. For walls only a user account can read, generate a user token with the `wall` scope instead.
+
+## How much does it cost to scrape VK?
+
+This Actor is billed by Apify platform usage (compute units, proxy traffic, storage). Runs are light: a browser is only launched in HTML mode, and API mode uses plain HTTP.
+
+Rough guide from real runs:
+
+- **30 posts, HTML mode** — around 15 seconds of a 4 GB run
+- **500 posts, API mode** — a handful of HTTP requests, no browser
+
+Keep costs down by setting `maxItems` to what you actually need, using a token so the run skips the browser entirely, and narrowing with `publishedAfter`.
+
+## Tips and advanced options
+
+- **Use a token.** It is faster, cheaper, more complete, and more reliable than HTML mode.
+- **Residential proxies matter.** VK blocks most datacenter ranges. If runs fail to connect, set the proxy country to `RU` in **Proxy configuration**.
+- **Date filters stop pagination early.** `publishedAfter` halts the crawl once older posts appear, so a narrow window is much cheaper than a wide one.
+- **Undated posts are dropped when a date filter is set**, because they cannot be checked against it. Set `keepUndatedPosts: true` to keep them.
+- **Scraping several communities?** Put them all in `vkTargets` — one run, deduplicated across targets.
+- **Schedule it.** Use the Schedules tab for daily monitoring, and integrations to push results onward.
+
+## FAQ
+
+**Does this work without a VK account or token?**
+Yes, in HTML mode — with the field limitations in the table above.
+
+**Why is `stats` null on some posts?**
+VK does not expose engagement counts in parseable public markup consistently. Use an access token for reliable numbers.
+
+**Why did I get fewer posts than I asked for?**
+VK limits how much of a wall it serves anonymously. The run log says so explicitly when it happens. A token lifts the limit.
+
+**Are timestamps in my timezone?**
+No — always UTC. In HTML mode, VK's displayed times are interpreted using `htmlTimezone` (Moscow by default) and converted to UTC.
+
+**Can it scrape private profiles?**
+No. Only public walls, or walls the supplied token can legitimately read. This Actor does not bypass VK's access controls.
+
+## Legal and support
+
+This Actor collects **publicly available data only**. You are responsible for how you use it, including compliance with VK's Terms of Service, GDPR, and any other applicable law. Scraping personal data may require a lawful basis — consult a lawyer if you are unsure. Do not use this Actor to collect personal data without a legitimate reason.
+
+Found a bug or need a field that is missing? Open a ticket in the **Issues** tab. If you need a tailored VK dataset or a custom integration, get in touch through the same channel.
