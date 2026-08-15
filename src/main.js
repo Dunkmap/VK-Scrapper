@@ -142,7 +142,13 @@ const runHtmlCrawl = async ({ config, targets, collector, proxyConfiguration }) 
                 ? `https://m.vk.com/${target.domain}`
                 : `https://m.vk.com/wall${target.ownerId}`,
             label: HTML_LABELS.WALL,
-            userData: { label: HTML_LABELS.WALL, target: target.raw, targetType: target.targetType },
+            userData: {
+                label: HTML_LABELS.WALL,
+                target: target.raw,
+                targetType: target.targetType,
+                // Known only for numeric/club targets; otherwise inferred from the page.
+                ownerId: target.ownerId ?? null,
+            },
         }));
 
     if (startRequests.length === 0) {

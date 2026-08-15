@@ -22,14 +22,14 @@ const MAX_SCROLL_ROUNDS = 40;
 const BARREN_ROUNDS_BEFORE_STOP = 3;
 
 /** Every markup generation VK has served a wall post in. */
-const POST_SELECTOR = '[data-post-id], .wall_item, ._post, .post';
+export const POST_SELECTOR = '[data-post-id], .wall_item, ._post, .post';
 
 /**
  * The wall itself. VK surrounds it with recommendation rails and "interesting
  * pages" blocks that use the same post markup but belong to other communities,
  * so the search has to be scoped to this subtree.
  */
-const WALL_ROOT_SELECTOR = '#wall_posts, .wall_posts, ._wall_posts, #page_wall_posts,'
+export const WALL_ROOT_SELECTOR = '#wall_posts, .wall_posts, ._wall_posts, #page_wall_posts,'
     + ' #wl_posts, .wall_module, [id^="page_wall_posts"]';
 
 /**

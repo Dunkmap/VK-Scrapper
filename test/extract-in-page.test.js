@@ -7,64 +7,101 @@ vi.mock('apify', () => ({
     },
 }));
 
-const { extractPostsInPage } = await import('../src/routes-html.js');
+const { POST_SELECTOR, WALL_ROOT_SELECTOR, extractPostsInPage } = await import('../src/routes-html.js');
+
+const SELECTORS = { postSelector: POST_SELECTOR, wallRootSelector: WALL_ROOT_SELECTOR };
 
 /**
  * Markup modelled on what VK actually served: a "Show more" button inside the
- * text node, an emoji image alongside real photos, and root-relative image URLs.
+ * text node, an emoji image alongside real photos, root-relative image URLs, a
+ * repeated pinned post, and - outside the wall - a recommendation rail carrying
+ * posts from other communities.
  */
 const FIXTURE = `
 <!doctype html>
 <html><head><base href="https://vk.com/vkvideo"></head><body>
-  <div class="_post post" data-post-id="-220754053_278529">
-    <a class="PostHeaderSubtitle__link" href="/wall-220754053_278529" title="12 авг 2024 в 10:30">
-      <span class="PostHeaderSubtitle__item">12 авг в 10:30</span>
-    </a>
-    <div class="wall_post_text">
-      Что объединяет ST и Дороха?<img class="emoji" src="/emoji/e/f09f9881.png">Любовь к своим жёнам
-      <span class="wall_post_more">Show more</span>
-      совместный трек
+  <div id="wall_posts">
+    <div class="_post post" data-post-id="-220754053_278529">
+      <a class="PostHeaderSubtitle__link" href="/wall-220754053_278529" title="12 авг 2024 в 10:30">
+        <span class="PostHeaderSubtitle__item">12 авг в 10:30</span>
+      </a>
+      <div class="wall_post_text">
+        Что объединяет ST и Дороха?<img class="emoji" src="/emoji/e/f09f9881.png">Любовь к своим жёнам
+        <span class="wall_post_more">Show more</span>
+        совместный трек
+      </div>
+      <div class="page_post_sized_thumbs">
+        <img src="/emoji/e/f09f9881.png">
+        <img src="//sun9-1.userapi.com/impg/photo-a.jpg">
+        <img data-src="https://sun9-2.userapi.com/impg/photo-b.jpg">
+        <img src="data:image/gif;base64,R0lGOD">
+        <img src="/images/icons/like.svg">
+        <img src="//sun9-1.userapi.com/impg/photo-a.jpg">
+      </div>
+      <div class="PostBottomAction PostBottomAction--like"><span class="PostBottomAction__count">1 234</span></div>
+      <div class="PostBottomAction PostBottomAction--views"><span class="PostBottomAction__count">98000</span></div>
     </div>
-    <div class="page_post_sized_thumbs">
-      <img src="/emoji/e/f09f9881.png">
-      <img src="//sun9-1.userapi.com/impg/photo-a.jpg">
-      <img data-src="https://sun9-2.userapi.com/impg/photo-b.jpg">
-      <img src="data:image/gif;base64,R0lGOD">
-      <img src="/images/icons/like.svg">
-      <img src="//sun9-1.userapi.com/impg/photo-a.jpg">
+
+    <div class="_post post" data-post-id="-220754053_278500">
+      <span class="rel_date" data-time="1700000000">14 ноя 2023</span>
+      <div class="wall_post_text">Second post</div>
+      <div class="copy_quote">quoted</div>
     </div>
-    <div class="PostBottomAction PostBottomAction--like"><span class="PostBottomAction__count">1 234</span></div>
-    <div class="PostBottomAction PostBottomAction--views"><span class="PostBottomAction__count">98000</span></div>
+
+    <!-- VK repeats a pinned post further down the wall, often with less markup. -->
+    <div class="_post post" data-post-id="-220754053_278529">
+      <div class="wall_post_text">Short</div>
+    </div>
   </div>
 
-  <div class="_post post" data-post-id="-220754053_278500">
-    <span class="rel_date" data-time="1700000000">14 ноя 2023</span>
-    <div class="wall_post_text">Second post</div>
-    <div class="copy_quote">quoted</div>
+  <!-- Recommendation rail: same markup, different communities, not this wall. -->
+  <div class="recommendations">
+    <div class="_post post" data-post-id="-217672812_12348">
+      <div class="wall_post_text">Foreign community post</div>
+    </div>
+    <div class="_post post" data-post-id="-207536086_8577">
+      <div class="wall_post_text">Another foreign post</div>
+    </div>
   </div>
+</body></html>`;
 
-  <!-- VK repeats a pinned post further down the wall, often with less markup. -->
-  <div class="_post post" data-post-id="-220754053_278529">
-    <div class="wall_post_text">Short</div>
+/** The same page with no recognisable wall container, forcing the fallback. */
+const UNSCOPED_FIXTURE = `
+<!doctype html>
+<html><head><base href="https://vk.com/vkvideo"></head><body>
+  <div class="feed">
+    <div class="_post post" data-post-id="-220754053_1"><div class="wall_post_text">One</div></div>
+    <div class="_post post" data-post-id="-217672812_2"><div class="wall_post_text">Foreign</div></div>
   </div>
 </body></html>`;
 
 describe('extractPostsInPage (real browser)', () => {
     let browser;
     let posts;
+    let wasScoped;
 
     beforeAll(async () => {
         browser = await chromium.launch();
         const page = await browser.newPage();
         await page.setContent(FIXTURE);
-        posts = await page.evaluate(extractPostsInPage);
+        ({ posts, wasScoped } = await page.evaluate(extractPostsInPage, SELECTORS));
     }, 120_000);
 
     afterAll(async () => {
         await browser?.close();
     });
 
-    it('finds every post container', () => {
+    it('reports that it found the wall container', () => {
+        expect(wasScoped).toBe(true);
+    });
+
+    it('ignores posts outside the wall, whatever markup they use', () => {
+        // Regression: recommendation rails leaked posts from other communities.
+        const owners = new Set(posts.map((post) => post.ownerId));
+        expect(owners).toEqual(new Set([-220754053]));
+    });
+
+    it('finds every post on the wall itself', () => {
         expect(posts).toHaveLength(2);
         expect(posts[0]).toMatchObject({ ownerId: -220754053, postId: 278529 });
     });
@@ -123,5 +160,17 @@ describe('extractPostsInPage (real browser)', () => {
         expect(posts[0].mediaTypes).toContain('photo');
         expect(posts[1].mediaTypes).toEqual([]);
         expect(posts[1].thumbnails).toEqual([]);
+    });
+
+    it('falls back to the whole document when no wall container exists', async () => {
+        const page = await browser.newPage();
+        await page.setContent(UNSCOPED_FIXTURE);
+        const result = await page.evaluate(extractPostsInPage, SELECTORS);
+
+        // Scoping failed, so it says so and still returns what it found - the
+        // owner filter downstream is what removes the foreign post.
+        expect(result.wasScoped).toBe(false);
+        expect(result.posts).toHaveLength(2);
+        await page.close();
     });
 });
