@@ -78,13 +78,34 @@ export const extractPostsInPage = ({ postSelector, wallRootSelector }) => {
         return null;
     };
 
-    /** VK renders counters as "1.2K"/"1,2 тыс." - only trust plain integers. */
+    /**
+     * VK writes counters either exactly ("1 234") or abbreviated ("1,2K", "1,2 тыс.",
+     * "3.4M", "5 млн"). Abbreviated values are rounded by VK, so they are returned
+     * with `isApproximate` set rather than being passed off as exact.
+     *
+     * @returns {{value: number, isApproximate: boolean}|null}
+     */
     const parseCounter = (raw) => {
         if (!raw) return null;
+
         // Strip spacing, including the non-breaking space VK uses as a thousands separator.
         const cleaned = [...raw].filter((char) => char.trim().length > 0).join('');
-        if (/^\d+$/.test(cleaned)) return Number(cleaned);
-        return null;
+        if (cleaned === '') return null;
+        if (/^\d+$/.test(cleaned)) return { value: Number(cleaned), isApproximate: false };
+
+        const match = /^(\d+(?:[.,]\d+)?)(k|к|тыс|m|м|млн|b|млрд)\.?$/i.exec(cleaned);
+        if (!match) return null;
+
+        const magnitude = {
+            k: 1e3, к: 1e3, тыс: 1e3, m: 1e6, м: 1e6, млн: 1e6, b: 1e9, млрд: 1e9,
+        }[match[2].toLowerCase()];
+        if (!magnitude) return null;
+
+        // A comma is a decimal separator in the Russian interface.
+        const amount = Number(match[1].replace(',', '.'));
+        if (!Number.isFinite(amount)) return null;
+
+        return { value: Math.round(amount * magnitude), isApproximate: true };
     };
 
     // Prefer the wall subtree; fall back to the whole document only if VK's
@@ -154,13 +175,46 @@ export const extractPostsInPage = ({ postSelector, wallRootSelector }) => {
                 .map((src) => new URL(src, document.baseURI).href),
         )];
 
-        const mediaTypes = [];
-        if (container.querySelector('a[href*="/photo"], .PhotoPrimaryAttachment, .page_post_sized_thumbs')) mediaTypes.push('photo');
-        if (container.querySelector('a[href*="/video"], .post_video_desc, .VideoSnippet')) mediaTypes.push('video');
-        if (container.querySelector('a[href*="/audio"], .audio_row')) mediaTypes.push('audio');
-        if (container.querySelector('a[href*="/doc"], .page_doc_row')) mediaTypes.push('doc');
+        // Attachment links carry the VK object each piece of media points at, which is
+        // far more useful than a thumbnail: photo/video/doc pages can be opened or
+        // resolved further, whereas a CDN thumbnail expires.
+        const ATTACHMENT_PATTERNS = [
+            { type: 'photo', pattern: /\/photo(-?\d+_\d+)/ },
+            { type: 'video', pattern: /\/video(-?\d+_\d+)/ },
+            { type: 'audio', pattern: /\/audio(-?\d+_\d+)/ },
+            { type: 'doc', pattern: /\/doc(-?\d+_\d+)/ },
+            { type: 'article', pattern: /\/@[\w.]+-/ },
+            { type: 'link', pattern: /\/away\.php\?to=/ },
+        ];
+
+        const attachments = [];
+        const seenAttachments = new Set();
+        for (const anchor of container.querySelectorAll('a[href]')) {
+            const href = anchor.getAttribute('href') ?? '';
+            for (const { type, pattern } of ATTACHMENT_PATTERNS) {
+                const hit = pattern.exec(href);
+                if (!hit) continue;
+
+                const absolute = new URL(href, document.baseURI).href;
+                const key = `${type}:${hit[1] ?? absolute}`;
+                if (seenAttachments.has(key)) break;
+                seenAttachments.add(key);
+
+                attachments.push({
+                    type,
+                    id: hit[1] ?? null,
+                    url: type === 'link'
+                        // VK wraps outbound links; recover the real destination.
+                        ? decodeURIComponent(new URL(absolute).searchParams.get('to') ?? absolute)
+                        : absolute,
+                });
+                break;
+            }
+        }
+
+        const mediaTypes = [...new Set(attachments.map((a) => a.type))];
         if (container.querySelector('.PollQuestion, .poll_board')) mediaTypes.push('poll');
-        // A thumbnail with no recognised container is still media - report it rather than lose it.
+        // A thumbnail with no recognised link is still media - report it rather than lose it.
         if (mediaTypes.length === 0 && thumbnails.length > 0) mediaTypes.push('photo');
 
         const post = {
@@ -179,13 +233,26 @@ export const extractPostsInPage = ({ postSelector, wallRootSelector }) => {
             headerSample: (dateNode || dateLink)
                 ? null
                 : container.innerHTML.slice(0, 400).replace(/\s+/g, ' '),
-            likes: parseCounter(firstText(container, ['.PostBottomAction--like .PostBottomAction__count', '._like_count', '.v_like'])),
-            comments: parseCounter(firstText(container, ['.PostBottomAction--comment .PostBottomAction__count', '._comments_count', '.v_comments'])),
-            reposts: parseCounter(firstText(container, ['.PostBottomAction--share .PostBottomAction__count', '._share_count', '.v_share'])),
-            views: parseCounter(firstText(container, ['.PostBottomAction--views .PostBottomAction__count', '._views_count', '.v_views'])),
+            likes: parseCounter(firstText(container, [
+                '.PostBottomAction--like .PostBottomAction__count', '._like_count', '.v_like',
+                '[class*="like"] [class*="count"]', '.PostButtonReactions__title',
+            ])),
+            comments: parseCounter(firstText(container, [
+                '.PostBottomAction--comment .PostBottomAction__count', '._comments_count', '.v_comments',
+                '[class*="comment"] [class*="count"]',
+            ])),
+            reposts: parseCounter(firstText(container, [
+                '.PostBottomAction--share .PostBottomAction__count', '._share_count', '.v_share',
+                '[class*="share"] [class*="count"]',
+            ])),
+            views: parseCounter(firstText(container, [
+                '.PostBottomAction--views .PostBottomAction__count', '._views_count', '.v_views',
+                '[class*="views"] [class*="count"]', '.PostBottomAction__count--views',
+            ])),
             isPinned: !!container.querySelector('.PostHeaderSubtitle__item--pinned, .wi_fixed'),
             isRepost: !!container.querySelector('.copy_quote, .PostCopyQuote, .wi_copy'),
             thumbnails,
+            attachments,
             mediaTypes,
         };
 
@@ -195,6 +262,35 @@ export const extractPostsInPage = ({ postSelector, wallRootSelector }) => {
     }
 
     return { posts: [...byId.values()], wasScoped };
+};
+
+/**
+ * Turns the raw counters into the dataset's `stats` block.
+ *
+ * VK abbreviates large numbers ("1,2 тыс."), and those are rounded at the source.
+ * `areApproximate` says so explicitly rather than letting a rounded figure pass
+ * for an exact one.
+ *
+ * @param {object} raw Post as returned from the page.
+ */
+const countersToStats = (raw) => {
+    const read = (counter) => counter?.value ?? null;
+    const likes = read(raw.likes);
+    const comments = read(raw.comments);
+    const reposts = read(raw.reposts);
+    const views = read(raw.views);
+
+    return {
+        likes,
+        comments,
+        reposts,
+        views,
+        engagement: [likes, comments, reposts].some((value) => value !== null)
+            ? (likes ?? 0) + (comments ?? 0) + (reposts ?? 0)
+            : null,
+        areApproximate: [raw.likes, raw.comments, raw.reposts, raw.views]
+            .some((counter) => counter?.isApproximate === true),
+    };
 };
 
 /**
@@ -334,7 +430,13 @@ export const createHtmlRouter = ({ collector, config }) => {
         let unreadableSample = null;
         let unreadableLabel = null;
 
+        // How many posts of this page were actually dealt with. The next offset must
+        // advance by this and not by the page size: stopping at the budget and then
+        // skipping ahead by the whole page steps over every post after the break.
+        let consumed = 0;
+
         for (const raw of rawPosts) {
+            consumed++;
             const compositeId = `${raw.ownerId}_${raw.postId}`;
 
             // Prefer a real timestamp; fall back to parsing the label VK printed.
@@ -377,19 +479,15 @@ export const createHtmlRouter = ({ collector, config }) => {
                 editedAt: null,
                 sourceUrl: `https://vk.com/wall${compositeId}`,
 
-                stats: {
-                    likes: raw.likes,
-                    comments: raw.comments,
-                    reposts: raw.reposts,
-                    views: raw.views,
-                    engagement: [raw.likes, raw.comments, raw.reposts].some((v) => v !== null)
-                        ? (raw.likes ?? 0) + (raw.comments ?? 0) + (raw.reposts ?? 0)
-                        : null,
-                },
+                stats: countersToStats(raw),
 
                 mediaTypes: raw.mediaTypes,
-                mediaCount: raw.mediaTypes.length,
-                attachments: raw.thumbnails.map((url) => ({ type: 'thumbnail', url })),
+                mediaCount: raw.attachments.length || raw.thumbnails.length,
+                attachments: [
+                    ...raw.attachments,
+                    // Thumbnails are kept as a fallback for media VK did not link.
+                    ...raw.thumbnails.map((url) => ({ type: 'thumbnail', id: null, url })),
+                ],
 
                 isRepost: raw.isRepost,
                 repostChain: [],
@@ -434,7 +532,7 @@ export const createHtmlRouter = ({ collector, config }) => {
             && pageIndex < MAX_WALL_PAGES;
 
         if (needMore) {
-            const nextOffset = offset + rawPosts.length;
+            const nextOffset = offset + consumed;
             // Stay on whichever host answered; a desktop fallback must not bounce back.
             const { origin } = new URL(request.url);
             log.info(`[${target}] Stored ${totalStored} so far; requesting wall offset ${nextOffset}.`);

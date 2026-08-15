@@ -38,8 +38,13 @@ const FIXTURE = `
         <img src="/images/icons/like.svg">
         <img src="//sun9-1.userapi.com/impg/photo-a.jpg">
       </div>
+      <a href="/photo-220754053_457301">photo</a>
+      <a href="/video-220754053_456789">video</a>
+      <a href="/photo-220754053_457301">duplicate photo link</a>
+      <a href="/away.php?to=https%3A%2F%2Fexample.com%2Fx">outbound</a>
       <div class="PostBottomAction PostBottomAction--like"><span class="PostBottomAction__count">1 234</span></div>
-      <div class="PostBottomAction PostBottomAction--views"><span class="PostBottomAction__count">98000</span></div>
+      <div class="PostBottomAction PostBottomAction--views"><span class="PostBottomAction__count">1,2 тыс.</span></div>
+      <div class="PostBottomAction PostBottomAction--share"><span class="PostBottomAction__count">3.4M</span></div>
     </div>
 
     <div class="_post post" data-post-id="-220754053_278500">
@@ -144,11 +149,31 @@ describe('extractPostsInPage (real browser)', () => {
         expect(posts[1].postedAtUnix).toBe(1_700_000_000);
     });
 
-    it('parses counters and rejects ambiguous ones', () => {
-        // "1 234" uses a plain space here, so it is unambiguous once stripped.
-        expect(posts[0].likes).toBe(1234);
-        expect(posts[0].views).toBe(98_000);
+    it('reads exact counters as exact', () => {
+        expect(posts[0].likes).toEqual({ value: 1234, isApproximate: false });
+    });
+
+    it('reads abbreviated counters instead of discarding them', () => {
+        // Regression: anything that was not a plain integer used to become null,
+        // which is why likes and views were empty on every HTML-mode run.
+        expect(posts[0].views).toEqual({ value: 1200, isApproximate: true });
+        expect(posts[0].reposts).toEqual({ value: 3_400_000, isApproximate: true });
+    });
+
+    it('leaves a counter null when VK printed none', () => {
         expect(posts[0].comments).toBeNull();
+    });
+
+    it('extracts attachment links with their VK object IDs', () => {
+        expect(posts[0].attachments).toEqual([
+            { type: 'photo', id: '-220754053_457301', url: 'https://vk.com/photo-220754053_457301' },
+            { type: 'video', id: '-220754053_456789', url: 'https://vk.com/video-220754053_456789' },
+            { type: 'link', id: null, url: 'https://example.com/x' },
+        ]);
+    });
+
+    it('derives media types from the attachments it actually found', () => {
+        expect(posts[0].mediaTypes).toEqual(['photo', 'video', 'link']);
     });
 
     it('detects reposts', () => {
